@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bora"
+version = "0.1.0"
+description = "A structured collaboration framework for human-AI coding projects"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Your Name" },
+]
+keywords = ["ai", "agents", "documentation", "ticketing", "collaboration", "claude", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Documentation",
+]
+dependencies = [
+    "PyYAML>=6.0",
+    "click>=8.0",
+]
+
+[project.urls]
+# Update these once you've created the GitHub repo.
+Homepage = "https://github.com/yourname/bora"
+Repository = "https://github.com/yourname/bora"
+Issues = "https://github.com/yourname/bora/issues"
+
+[project.scripts]
+bora = "bora.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bora*"]
