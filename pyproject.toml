@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [
-    { name = "Your Name" },
+    { name = "Tony Knight" },
 ]
 keywords = ["ai", "agents", "documentation", "ticketing", "collaboration", "claude", "llm"]
 classifiers = [
@@ -36,9 +36,9 @@ dependencies = [
 
 [project.urls]
 # Update these once you've created the GitHub repo.
-Homepage = "https://github.com/yourname/bora"
-Repository = "https://github.com/yourname/bora"
-Issues = "https://github.com/yourname/bora/issues"
+Homepage = "https://github.com/tonyknight/Bora"
+Repository = "https://github.com/tonyknight/Bora"
+Issues = "https://github.com/tonyknight/Bora/issues"
 
 [project.scripts]
 bora = "bora.cli:main"
