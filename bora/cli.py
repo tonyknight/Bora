@@ -30,6 +30,7 @@ from .paths import (
     require_repo_root,
     tickets_dir,
 )
+from .skill import TOOLS, install as install_skill, list_status as skill_list_status, uninstall as uninstall_skill
 from .status import write_tasks_md
 from .templates import AGENTS_MD, ARCHITECTURE_MD_TEMPLATE, PROJECT_MD_TEMPLATE
 from .ticket import find_ticket, load_all_tickets, parse_ticket
@@ -80,6 +81,33 @@ def _print_lint_issues(issues, root: Path, header: Optional[str] = None) -> bool
     return has_errors
 
 
+# --- skill helpers (used by `init` and the `skill` group) -----------------
+
+_TOOL_CHOICES = sorted(TOOLS.keys()) + ["all"]
+
+
+def _resolve_tools(*names: str):
+    """Translate one or more CLI tool names (case-insensitive) into a list of
+    Tool objects. The literal `all` expands to every known tool. Duplicates
+    across the inputs are dropped while preserving first-seen order."""
+    seen: dict[str, object] = {}
+    for raw in names:
+        key = raw.lower()
+        if key == "all":
+            for t in TOOLS.values():
+                seen.setdefault(t.key, t)
+        else:
+            seen.setdefault(key, TOOLS[key])
+    return list(seen.values())
+
+
+def _project_root_or_none(project: bool) -> Optional[Path]:
+    """When --project is given, require a repo root; otherwise return None."""
+    if not project:
+        return None
+    return require_repo_root()
+
+
 # =============================================================================
 # Top-level CLI
 # =============================================================================
@@ -97,13 +125,27 @@ def main():
 
 
 @main.command()
+@click.argument(
+    "tools",
+    nargs=-1,
+    type=click.Choice(_TOOL_CHOICES, case_sensitive=False),
+)
 @click.option(
     "--force",
     is_flag=True,
     help="Overwrite existing files. Use with caution.",
 )
-def init(force: bool) -> None:
-    """Scaffold AGENTS.md and docs/ai/ in the current directory."""
+@click.option(
+    "--skill-global",
+    is_flag=True,
+    help="Install requested skills at the user-level location (~/.claude/, ~/.config/opencode/) instead of inside this repo.",
+)
+def init(tools: tuple, force: bool, skill_global: bool) -> None:
+    """Scaffold AGENTS.md and docs/ai/ in the current directory.
+
+    Optionally install the bora skill for one or more AI tools in the same
+    step, e.g. `bora init claude`, `bora init claude opencode`, `bora init all`.
+    """
     root = Path.cwd()
     today = date.today().isoformat()
 
@@ -136,10 +178,31 @@ def init(force: bool) -> None:
     write_tasks_md(root)
     click.echo(f"Created {DOCS_DIR}/Tasks.md")
 
+    # Optionally install the bora skill for the requested tools.
+    skill_errors = False
+    if tools:
+        skill_root = None if skill_global else root
+        for t in _resolve_tools(*tools):
+            try:
+                result = install_skill(t, project_root=skill_root, force=force)
+            except FileExistsError as exc:
+                click.echo(f"{t.display}: {exc}", err=True)
+                skill_errors = True
+                continue
+            try:
+                shown = result.path.relative_to(root)
+            except ValueError:
+                shown = result.path
+            verb = "Updated" if result.overwritten else "Installed"
+            click.echo(f"{verb} bora skill for {t.display} → {shown}")
+
     click.echo("\nProject scaffolded. Next steps:")
     click.echo("  1. Edit docs/ai/Project.md to describe what you're building.")
     click.echo("  2. Edit docs/ai/Architecture.md once design takes shape.")
     click.echo("  3. Create your first ticket: bora ticket new \"<title>\"")
+
+    if skill_errors:
+        sys.exit(1)
 
 
 # =============================================================================
@@ -498,6 +561,88 @@ def decision_new(title: str) -> None:
     arch_path.write_text(existing + entry, encoding="utf-8")
     click.echo(f"Appended decision entry to {ARCHITECTURE_FILE}")
     _open_in_editor(arch_path)
+
+
+# =============================================================================
+# skill
+# =============================================================================
+
+
+@main.group()
+def skill() -> None:
+    """Install or remove the bora skill for AI coding tools."""
+
+
+@skill.command("install")
+@click.argument("tool", type=click.Choice(_TOOL_CHOICES, case_sensitive=False))
+@click.option(
+    "--project",
+    is_flag=True,
+    help="Install into the current repo (./.claude/, ./.opencode/) instead of the user-level location.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Overwrite an existing SKILL.md even if it isn't ours.",
+)
+def skill_install(tool: str, project: bool, force: bool) -> None:
+    """Install the bora skill for an AI tool (claude, opencode, all)."""
+    root = _project_root_or_none(project)
+    had_error = False
+    for t in _resolve_tools(tool):
+        try:
+            result = install_skill(t, project_root=root, force=force)
+        except FileExistsError as exc:
+            click.echo(f"{t.display}: {exc}", err=True)
+            had_error = True
+            continue
+        verb = "Updated" if result.overwritten else "Installed"
+        click.echo(f"{verb} bora skill for {t.display} → {result.path}")
+    if had_error:
+        sys.exit(1)
+
+
+@skill.command("uninstall")
+@click.argument("tool", type=click.Choice(_TOOL_CHOICES, case_sensitive=False))
+@click.option(
+    "--project",
+    is_flag=True,
+    help="Uninstall from the current repo instead of the user-level location.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Remove the skill directory even if its SKILL.md isn't ours.",
+)
+def skill_uninstall(tool: str, project: bool, force: bool) -> None:
+    """Uninstall the bora skill for an AI tool (claude, opencode, all)."""
+    root = _project_root_or_none(project)
+    for t in _resolve_tools(tool):
+        result = uninstall_skill(t, project_root=root, force=force)
+        if result.removed:
+            click.echo(f"Removed bora skill for {t.display} ({result.path})")
+        else:
+            click.echo(f"{t.display}: {result.reason} ({result.path})", err=True)
+
+
+@skill.command("list")
+def skill_list() -> None:
+    """Show where the bora skill is installed for each known tool."""
+    # Project root is optional here — if we're inside a repo, also show project scope.
+    from .paths import find_repo_root
+    root = find_repo_root()
+    rows = skill_list_status(project_root=root)
+
+    width_tool = max(len(s.tool.display) for s in rows)
+    width_scope = max(len(s.scope) for s in rows)
+    for s in rows:
+        if not s.installed:
+            mark = "not installed"
+        elif s.is_ours:
+            mark = "installed"
+        else:
+            mark = "installed (foreign SKILL.md)"
+        click.echo(f"{s.tool.display:<{width_tool}}  {s.scope:<{width_scope}}  {mark:<28}  {s.path}")
 
 
 if __name__ == "__main__":

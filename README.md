@@ -1,7 +1,7 @@
 # Bora
 
 > Brazilian Portuguese for slang for *let's go*.
-It's a contraction of the more formal *"vamos embora"*
+A contraction of the more formal *"vamos embora"*
 
 A structured initialization framework for collaborative human & AI coding projects
 
@@ -147,13 +147,17 @@ This is the main reason pipx is recommended: it handles `PATH` for you.
 
 ```bash
 cd /path/to/your/repo
-bora init                              # scaffold AGENTS.md and docs/ai/
+bora init claude                       # scaffold + install the bora skill for Claude Code
 $EDITOR docs/ai/Project.md             # describe what you're building
 bora ticket new "Set up database" --priority high
 bora ticket set 01 status in-progress  # fuzzy id match works
 bora status                            # regenerate Tasks.md
 bora context --budget 8000             # print briefing for a fresh model session
 ```
+
+`bora init` accepts one or more tool names (`claude`, `opencode`, or
+`all`) to install the bora skill in the same step. Run plain
+`bora init` if you only want the docs scaffold and no skill.
 
 To brief a new chat session with a model, `bora context` prints all the
 files an AI agent should read, in order. Pipe it to your clipboard:
@@ -170,7 +174,7 @@ Paste it as the first message of your conversation.
 
 | Command                                  | What it does                                            |
 | ---------------------------------------- | ------------------------------------------------------- |
-| `bora init`                              | Scaffold `AGENTS.md` and `docs/ai/` in the current dir. |
+| `bora init [tool ...]`                   | Scaffold `AGENTS.md` and `docs/ai/`. Optionally install the bora skill for one or more tools (`claude`, `opencode`, `all`). Add `--skill-global` to install at the user-level location instead of in this repo. |
 | `bora ticket new "<title>"`              | Create a new ticket. Options: `--type`, `--priority`, `--parent`. |
 | `bora ticket list`                       | List tickets. Filters: `--status`, `--type`, `--priority`, `--blocked`. |
 | `bora ticket show <id>`                  | Print a ticket's contents. Fuzzy ID match supported.    |
@@ -181,6 +185,9 @@ Paste it as the first message of your conversation.
 | `bora context [--budget N]`              | Print briefing content, optionally token-bounded.       |
 | `bora lint`                              | Validate frontmatter and cross-references.              |
 | `bora decision new "<title>"`            | Append a templated decision entry to `Architecture.md`. |
+| `bora skill install <tool>`              | Install the bora skill for an AI tool (`claude`, `opencode`, `all`). |
+| `bora skill uninstall <tool>`            | Remove the bora skill for an AI tool. |
+| `bora skill list`                        | Show where the bora skill is installed for each known tool. |
 
 Run `bora <command> --help` for full options on any command.
 
@@ -214,6 +221,73 @@ that any LLM can read. Patterns that work well:
   may struggle with structured frontmatter — run `bora lint` after any
   model writes to a ticket file to catch errors.
 
+## Installing the bora skill
+
+Claude Code, OpenCode, and several other agentic tools support
+**skills** — directories containing a `SKILL.md` file that the agent
+loads on demand when its description matches the current task. `bora`
+ships with a skill that briefs the agent on how to use the CLI and
+maintain the `docs/ai/` files correctly.
+
+For new projects, the simplest way is to install it as part of `bora init`:
+
+```bash
+cd /path/to/your/repo
+bora init claude            # scaffold + install for Claude Code
+bora init opencode          # scaffold + install for OpenCode
+bora init claude opencode   # scaffold + install for both
+bora init all               # same as above
+```
+
+Tool names are case-insensitive (`Claude`, `claude`, and `CLAUDE` all
+work). By default `bora init <tool>` installs the skill **inside the
+current repo** so it ships with the project; pass `--skill-global` to
+install at the user-level location instead.
+
+For projects already initialized — or if you want to install/uninstall
+the skill on its own — use the `skill` command group.
+
+Install globally (default) so every project gets it:
+
+```bash
+bora skill install claude            # ~/.claude/skills/bora/SKILL.md
+bora skill install opencode          # ~/.config/opencode/skills/bora/SKILL.md
+bora skill install all               # both at once
+```
+
+Or install per-project so the skill ships with the repo:
+
+```bash
+cd /path/to/repo
+bora skill install claude --project  # ./.claude/skills/bora/SKILL.md
+```
+
+Inspect what's installed where:
+
+```bash
+bora skill list
+```
+
+Remove cleanly:
+
+```bash
+bora skill uninstall claude          # global
+bora skill uninstall all --project   # everything in this repo
+```
+
+`bora skill uninstall` only deletes a `SKILL.md` whose YAML frontmatter
+declares `name: bora` — it won't clobber a skill it didn't install.
+Pass `--force` to override.
+
+| Tool | Global path | Project path |
+| --- | --- | --- |
+| `claude` | `~/.claude/skills/bora/SKILL.md` | `./.claude/skills/bora/SKILL.md` |
+| `opencode` | `~/.config/opencode/skills/bora/SKILL.md` | `./.opencode/skills/bora/SKILL.md` |
+
+> OpenCode also reads from `~/.claude/skills/`, so if you've installed
+> for Claude you'll get the skill in OpenCode for free. Installing
+> explicitly to OpenCode's own location is still the cleanest setup.
+
 ## Contributing
 
 Contributions welcome. The code is in `bora/`:
@@ -225,6 +299,7 @@ Contributions welcome. The code is in `bora/`:
 - `status.py` — `Tasks.md` generation.
 - `create.py` — chronological ID generation.
 - `context.py` — briefing assembly.
+- `skill.py` — SKILL.md template and per-tool install/uninstall logic.
 - `cli.py` — Click-based command surface.
 
 Before opening a PR, run through the smoke test in a scratch directory:
@@ -237,32 +312,6 @@ bora ticket set 01 status in-progress
 bora status
 bora lint
 ```
-
-## Publishing to PyPI (maintainer notes)
-
-When you're ready to publish:
-
-1. Confirm the package name `bora` is available at
-   https://pypi.org/project/bora/. If taken, change `name` in
-   `pyproject.toml` (consider `bora-cli` while keeping the command
-   itself as `bora`).
-2. Update `authors` and the `[project.urls]` block in `pyproject.toml`
-   to point at your GitHub.
-3. Bump `version` in both `pyproject.toml` and `bora/__init__.py`.
-4. Build and upload:
-
-   ```bash
-   pip install --upgrade build twine
-   python -m build
-   twine upload dist/*
-   ```
-
-5. Tag the release in git:
-
-   ```bash
-   git tag v0.1.0
-   git push --tags
-   ```
 
 ## License
 
