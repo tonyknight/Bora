@@ -30,6 +30,11 @@ from .paths import (
     require_repo_root,
     tickets_dir,
 )
+from .profile import read_profile, require_profile, write_profile
+from .writer_chapter import create_chapter
+from .writer_init import init_writer_project
+from .writer_skill import install_obsidian, uninstall_obsidian
+from .writer_status import compile_status as compile_write_status
 from .skill import TOOLS, install as install_skill, list_status as skill_list_status, uninstall as uninstall_skill
 from .status import write_tasks_md
 from .templates import AGENTS_MD, ARCHITECTURE_MD_TEMPLATE, PROJECT_MD_TEMPLATE
@@ -42,9 +47,6 @@ from .ticket import find_ticket, load_all_tickets, parse_ticket
 
 
 def _open_in_editor(path: Path) -> None:
-    """Open a file in the user's $EDITOR. Silently does nothing if not set
-    or in a non-interactive context. Models running this in a non-interactive
-    shell will get the file path printed and can read it themselves."""
     editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
     if not editor or not sys.stdin.isatty():
         return
@@ -57,7 +59,6 @@ def _open_in_editor(path: Path) -> None:
 
 
 def _regenerate_status(root: Path, *, quiet: bool = False) -> None:
-    """Regenerate Tasks.md and optionally print a notice."""
     path = write_tasks_md(root)
     if not quiet:
         try:
@@ -68,7 +69,6 @@ def _regenerate_status(root: Path, *, quiet: bool = False) -> None:
 
 
 def _print_lint_issues(issues, root: Path, header: Optional[str] = None) -> bool:
-    """Print issues. Returns True if any errors (not just warnings)."""
     if not issues:
         return False
     if header:
@@ -81,15 +81,10 @@ def _print_lint_issues(issues, root: Path, header: Optional[str] = None) -> bool
     return has_errors
 
 
-# --- skill helpers (used by `init` and the `skill` group) -----------------
-
 _TOOL_CHOICES = sorted(TOOLS.keys()) + ["all"]
 
 
 def _resolve_tools(*names: str):
-    """Translate one or more CLI tool names (case-insensitive) into a list of
-    Tool objects. The literal `all` expands to every known tool. Duplicates
-    across the inputs are dropped while preserving first-seen order."""
     seen: dict[str, object] = {}
     for raw in names:
         key = raw.lower()
@@ -102,49 +97,97 @@ def _resolve_tools(*names: str):
 
 
 def _project_root_or_none(project: bool) -> Optional[Path]:
-    """When --project is given, require a repo root; otherwise return None."""
     if not project:
         return None
     return require_repo_root()
 
 
+def _get_skip_flag(ctx: click.Context) -> bool:
+    """Walk up the context chain to find skip_profile_check from the root."""
+    obj = ctx.obj
+    if isinstance(obj, dict):
+        return obj.get("skip_profile_check", False)
+    return False
+
+
 # =============================================================================
-# Top-level CLI
+# Root group — profile-aware help filtering
 # =============================================================================
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+class _ProfileAwareGroup(click.Group):
+    """Root Click group that hides the irrelevant profile subgroup from help."""
+
+    def list_commands(self, ctx: click.Context):
+        commands = super().list_commands(ctx)
+        root = find_repo_root()
+        if root is None:
+            return commands
+        data = read_profile(root)
+        if data is None:
+            return commands
+        profile = data.get("profile")
+        if profile == "dev":
+            return [c for c in commands if c != "write"]
+        if profile == "write":
+            return [c for c in commands if c != "dev"]
+        return commands
+
+
+@click.group(cls=_ProfileAwareGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(version=__version__, prog_name="bora")
-def main():
-    """A structured collaboration framework for human-AI coding projects."""
+@click.option(
+    "--skip-profile-check",
+    is_flag=True,
+    default=False,
+    hidden=True,
+    help="Bypass profile locking (advanced users only).",
+)
+@click.pass_context
+def main(ctx: click.Context, skip_profile_check: bool) -> None:
+    """A structured collaboration framework for human-AI projects."""
+    ctx.ensure_object(dict)
+    ctx.obj["skip_profile_check"] = skip_profile_check
 
 
 # =============================================================================
-# init
+# dev group
 # =============================================================================
 
 
-@main.command()
+@main.group()
+@click.pass_context
+def dev(ctx: click.Context) -> None:
+    """Dev profile commands (tickets, status, lint, context, decisions, skills)."""
+    if ctx.invoked_subcommand == "init":
+        return
+    root = find_repo_root()
+    if root is not None:
+        require_profile(root, "dev", skip_check=_get_skip_flag(ctx))
+
+
+# =============================================================================
+# dev init
+# =============================================================================
+
+
+@dev.command("init")
 @click.argument(
     "tools",
     nargs=-1,
     type=click.Choice(_TOOL_CHOICES, case_sensitive=False),
 )
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Overwrite existing files. Use with caution.",
-)
+@click.option("--force", is_flag=True, help="Overwrite existing files. Use with caution.")
 @click.option(
     "--skill-global",
     is_flag=True,
-    help="Install requested skills at the user-level location (~/.claude/, ~/.config/opencode/) instead of inside this repo.",
+    help="Install skills at the user level (~/.claude/) instead of inside this repo.",
 )
-def init(tools: tuple, force: bool, skill_global: bool) -> None:
-    """Scaffold AGENTS.md and docs/ai/ in the current directory.
+def dev_init(tools: tuple, force: bool, skill_global: bool) -> None:
+    """Scaffold a dev profile project (AGENTS.md, docs/ai/, tickets).
 
     Optionally install the bora skill for one or more AI tools in the same
-    step, e.g. `bora init claude`, `bora init claude opencode`, `bora init all`.
+    step: bora dev init claude, bora dev init all.
     """
     root = Path.cwd()
     today = date.today().isoformat()
@@ -155,9 +198,10 @@ def init(tools: tuple, force: bool, skill_global: bool) -> None:
         (root / ARCHITECTURE_FILE, ARCHITECTURE_MD_TEMPLATE.format(today=today)),
     ]
 
-    # Refuse to overwrite unless --force
     if not force:
         existing = [p for p, _ in files_to_create if p.exists()]
+        if (root / ".bora" / "profile.json").exists():
+            existing.append(root / ".bora" / "profile.json")
         if existing:
             click.echo("Refusing to overwrite existing files:", err=True)
             for p in existing:
@@ -165,20 +209,19 @@ def init(tools: tuple, force: bool, skill_global: bool) -> None:
             click.echo("Use --force to overwrite.", err=True)
             sys.exit(1)
 
-    # Create directories
     (root / TICKETS_DIR).mkdir(parents=True, exist_ok=True)
 
-    # Write files
+    write_profile(root, "dev")
+    click.echo("Created .bora/profile.json")
+
     for path, content in files_to_create:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         click.echo(f"Created {path.relative_to(root)}")
 
-    # Generate initial Tasks.md
     write_tasks_md(root)
     click.echo(f"Created {DOCS_DIR}/Tasks.md")
 
-    # Optionally install the bora skill for the requested tools.
     skill_errors = False
     if tools:
         skill_root = None if skill_global else root
@@ -196,21 +239,21 @@ def init(tools: tuple, force: bool, skill_global: bool) -> None:
             verb = "Updated" if result.overwritten else "Installed"
             click.echo(f"{verb} bora skill for {t.display} → {shown}")
 
-    click.echo("\nProject scaffolded. Next steps:")
+    click.echo("\nDev project scaffolded. Next steps:")
     click.echo("  1. Edit docs/ai/Project.md to describe what you're building.")
     click.echo("  2. Edit docs/ai/Architecture.md once design takes shape.")
-    click.echo("  3. Create your first ticket: bora ticket new \"<title>\"")
+    click.echo("  3. Create your first ticket: bora dev ticket new \"<title>\"")
 
     if skill_errors:
         sys.exit(1)
 
 
 # =============================================================================
-# ticket
+# dev ticket
 # =============================================================================
 
 
-@main.group()
+@dev.group()
 def ticket() -> None:
     """Manage tickets."""
 
@@ -218,79 +261,34 @@ def ticket() -> None:
 @ticket.command("new")
 @click.argument("title")
 @click.option(
-    "--type",
-    "ticket_type",
+    "--type", "ticket_type",
     type=click.Choice(sorted(VALID_TYPES)),
-    default="feature",
-    show_default=True,
+    default="feature", show_default=True,
 )
-@click.option(
-    "--priority",
-    type=click.Choice(sorted(VALID_PRIORITIES)),
-    default="medium",
-    show_default=True,
-)
-@click.option(
-    "--parent",
-    default="",
-    help="Parent ticket id (for child tickets).",
-)
-@click.option(
-    "--no-edit",
-    is_flag=True,
-    help="Don't open the new ticket in $EDITOR.",
-)
+@click.option("--priority", type=click.Choice(sorted(VALID_PRIORITIES)), default="medium", show_default=True)
+@click.option("--parent", default="", help="Parent ticket id (for child tickets).")
+@click.option("--no-edit", is_flag=True, help="Don't open the new ticket in $EDITOR.")
 def ticket_new(title: str, ticket_type: str, priority: str, parent: str, no_edit: bool) -> None:
     """Create a new ticket."""
     root = require_repo_root()
-
-    # If parent specified, validate it exists
     if parent:
         parent_ticket = find_ticket(tickets_dir(root), parent)
         if parent_ticket is None:
             click.echo(f"Error: parent ticket not found: {parent}", err=True)
             sys.exit(1)
-        # Use the resolved id, not whatever shorthand was passed
         parent = parent_ticket.id
-
-    path = create_ticket(
-        tickets_dir(root),
-        title=title,
-        ticket_type=ticket_type,
-        priority=priority,
-        parent=parent,
-    )
-    rel = path.relative_to(root)
-    click.echo(f"Created {rel}")
-
+    path = create_ticket(tickets_dir(root), title=title, ticket_type=ticket_type, priority=priority, parent=parent)
+    click.echo(f"Created {path.relative_to(root)}")
     if not no_edit:
         _open_in_editor(path)
-
     _regenerate_status(root)
 
 
 @ticket.command("list")
-@click.option(
-    "--status",
-    type=click.Choice(sorted(VALID_STATUSES)),
-    help="Filter by status.",
-)
-@click.option(
-    "--type",
-    "ticket_type",
-    type=click.Choice(sorted(VALID_TYPES)),
-    help="Filter by type.",
-)
-@click.option(
-    "--priority",
-    type=click.Choice(sorted(VALID_PRIORITIES)),
-    help="Filter by priority.",
-)
-@click.option(
-    "--blocked",
-    is_flag=True,
-    help="Show only tickets with unfinished dependencies.",
-)
+@click.option("--status", type=click.Choice(sorted(VALID_STATUSES)), help="Filter by status.")
+@click.option("--type", "ticket_type", type=click.Choice(sorted(VALID_TYPES)), help="Filter by type.")
+@click.option("--priority", type=click.Choice(sorted(VALID_PRIORITIES)), help="Filter by priority.")
+@click.option("--blocked", is_flag=True, help="Show only tickets with unfinished dependencies.")
 def ticket_list(status: Optional[str], ticket_type: Optional[str], priority: Optional[str], blocked: bool) -> None:
     """List tickets in a table."""
     root = require_repo_root()
@@ -311,17 +309,9 @@ def ticket_list(status: Optional[str], ticket_type: Optional[str], priority: Opt
         click.echo("No tickets match.")
         return
 
-    # Render as a simple aligned table
-    rows = [
-        (t.id, t.status, t.priority, t.type, t.title)
-        for t in tickets
-    ]
+    rows = [(t.id, t.status, t.priority, t.type, t.title) for t in tickets]
     headers = ("ID", "STATUS", "PRIORITY", "TYPE", "TITLE")
-    widths = [
-        max(len(headers[i]), max(len(row[i]) for row in rows))
-        for i in range(len(headers))
-    ]
-    # Cap title width so very long titles don't wreck the layout
+    widths = [max(len(headers[i]), max(len(row[i]) for row in rows)) for i in range(len(headers))]
     widths[-1] = min(widths[-1], 60)
 
     def fmt(row):
@@ -355,28 +345,18 @@ def ticket_show(ticket_id: str) -> None:
 @click.argument("field")
 @click.argument("value")
 def ticket_set(ticket_id: str, field: str, value: str) -> None:
-    """Update a frontmatter field on a ticket.
-
-    Validates field name and value. Setting status=done auto-populates the
-    closed date. Setting status to anything else clears the closed date.
-    """
+    """Update a frontmatter field on a ticket."""
     root = require_repo_root()
     t = find_ticket(tickets_dir(root), ticket_id)
     if t is None:
         click.echo(f"No ticket matched: {ticket_id}", err=True)
         sys.exit(1)
 
-    # Validate field name — we allow the "settable" subset to keep this
-    # command from being a foot-gun. Use direct file edits for unusual cases.
     settable = {"title", "type", "priority", "status", "notes", "parent"}
     if field not in settable:
-        click.echo(
-            f"Error: cannot set field {field!r}. Settable fields: {sorted(settable)}",
-            err=True,
-        )
+        click.echo(f"Error: cannot set field {field!r}. Settable fields: {sorted(settable)}", err=True)
         sys.exit(1)
 
-    # Validate enumerated values
     if field == "type" and value not in VALID_TYPES:
         click.echo(f"Error: invalid type {value!r}. Expected one of {sorted(VALID_TYPES)}", err=True)
         sys.exit(1)
@@ -386,7 +366,6 @@ def ticket_set(ticket_id: str, field: str, value: str) -> None:
     if field == "status" and value not in VALID_STATUSES:
         click.echo(f"Error: invalid status {value!r}. Expected one of {sorted(VALID_STATUSES)}", err=True)
         sys.exit(1)
-
     if field == "parent" and value:
         parent = find_ticket(tickets_dir(root), value)
         if parent is None:
@@ -395,14 +374,11 @@ def ticket_set(ticket_id: str, field: str, value: str) -> None:
         value = parent.id
 
     t.set_field(field, value)
-
-    # Status transitions: keep closed date in sync
     if field == "status":
         if value == "done" and not t.frontmatter.get("closed"):
             t.frontmatter["closed"] = date.today()
         elif value != "done" and t.frontmatter.get("closed"):
             t.frontmatter["closed"] = None
-
     t.save()
     click.echo(f"Updated {t.id}: {field} = {value}")
     _regenerate_status(root)
@@ -412,11 +388,7 @@ def ticket_set(ticket_id: str, field: str, value: str) -> None:
 @click.argument("ticket_id")
 @click.argument("text")
 def ticket_note(ticket_id: str, text: str) -> None:
-    """Append a dated entry to a ticket's body Notes section.
-
-    Useful for the model (or human) to record progress without rewriting
-    the whole file. Each entry gets today's date as a subheading.
-    """
+    """Append a dated entry to a ticket's body Notes section."""
     root = require_repo_root()
     t = find_ticket(tickets_dir(root), ticket_id)
     if t is None:
@@ -435,99 +407,83 @@ def ticket_note(ticket_id: str, text: str) -> None:
 def ticket_subtask(ticket_id: str, subtask_id: str, status: str) -> None:
     """Update a frontmatter subtask's status."""
     from .paths import VALID_SUBTASK_STATUSES
-
     root = require_repo_root()
     t = find_ticket(tickets_dir(root), ticket_id)
     if t is None:
         click.echo(f"No ticket matched: {ticket_id}", err=True)
         sys.exit(1)
-
     if status not in VALID_SUBTASK_STATUSES:
         click.echo(
-            f"Error: invalid subtask status {status!r}. "
-            f"Expected one of {sorted(VALID_SUBTASK_STATUSES)}",
+            f"Error: invalid subtask status {status!r}. Expected one of {sorted(VALID_SUBTASK_STATUSES)}",
             err=True,
         )
         sys.exit(1)
-
     if not t.set_subtask_status(subtask_id, status):
         click.echo(f"Error: subtask {subtask_id!r} not found in {t.id}", err=True)
         sys.exit(1)
-
     t.save()
     click.echo(f"Updated {t.id}: subtask {subtask_id} = {status}")
     _regenerate_status(root)
 
 
 # =============================================================================
-# status
+# dev status
 # =============================================================================
 
 
-@main.command("status")
-def cmd_status() -> None:
+@dev.command("status")
+def dev_status() -> None:
     """Regenerate Tasks.md from current ticket state."""
     root = require_repo_root()
     path = write_tasks_md(root)
-    rel = path.relative_to(root)
-    click.echo(f"Wrote {rel}")
+    click.echo(f"Wrote {path.relative_to(root)}")
 
 
 # =============================================================================
-# context
+# dev context
 # =============================================================================
 
 
-@main.command("context")
-@click.option(
-    "--budget",
-    type=int,
-    default=None,
-    help="Maximum approximate token count. Truncates by dropping less-essential files.",
-)
-def cmd_context(budget: Optional[int]) -> None:
+@dev.command("context")
+@click.option("--budget", type=int, default=None, help="Maximum approximate token count.")
+def dev_context(budget: Optional[int]) -> None:
     """Print briefing content for a fresh model session.
 
     Pipe to your clipboard or paste into a chat to brief a model:
-        bora context | pbcopy
-        bora context --budget 8000
+        bora dev context | pbcopy
+        bora dev context --budget 8000
     """
     root = require_repo_root()
     content = assemble_context(root, budget=budget)
     click.echo(content, nl=False)
     if budget is not None:
-        click.echo(
-            f"\n[~{estimate_tokens(content)} tokens, budget {budget}]",
-            err=True,
-        )
+        click.echo(f"\n[~{estimate_tokens(content)} tokens, budget {budget}]", err=True)
 
 
 # =============================================================================
-# lint
+# dev lint
 # =============================================================================
 
 
-@main.command("lint")
-def cmd_lint() -> None:
+@dev.command("lint")
+def dev_lint() -> None:
     """Validate frontmatter and cross-references across all tickets."""
     root = require_repo_root()
     issues = lint_all(tickets_dir(root))
-
     if not issues:
         click.echo("OK — no issues found.")
         return
-
     has_errors = _print_lint_issues(issues, root, header=f"Found {len(issues)} issue(s):")
     if has_errors:
         sys.exit(1)
 
 
 # =============================================================================
-# decision
+# dev decision
 # =============================================================================
 
 
-@main.group()
+@dev.group()
 def decision() -> None:
     """Manage architecture decisions."""
 
@@ -539,12 +495,8 @@ def decision_new(title: str) -> None:
     root = require_repo_root()
     arch_path = root / ARCHITECTURE_FILE
     if not arch_path.exists():
-        click.echo(
-            f"Error: {ARCHITECTURE_FILE} does not exist. Run `bora init` first.",
-            err=True,
-        )
+        click.echo(f"Error: {ARCHITECTURE_FILE} does not exist. Run `bora dev init` first.", err=True)
         sys.exit(1)
-
     today = date.today().isoformat()
     entry = (
         f"\n### {today} — {title}\n\n"
@@ -552,10 +504,7 @@ def decision_new(title: str) -> None:
         "**Alternatives considered:** \n\n"
         "**Reasoning:** \n"
     )
-
     existing = arch_path.read_text(encoding="utf-8")
-    # Append to end. We trust the user to have a "Decision log" heading;
-    # if not, the entry just appears at the bottom.
     if not existing.endswith("\n"):
         existing += "\n"
     arch_path.write_text(existing + entry, encoding="utf-8")
@@ -564,27 +513,19 @@ def decision_new(title: str) -> None:
 
 
 # =============================================================================
-# skill
+# dev skill
 # =============================================================================
 
 
-@main.group()
+@dev.group()
 def skill() -> None:
     """Install or remove the bora skill for AI coding tools."""
 
 
 @skill.command("install")
 @click.argument("tool", type=click.Choice(_TOOL_CHOICES, case_sensitive=False))
-@click.option(
-    "--project",
-    is_flag=True,
-    help="Install into the current repo (./.claude/, ./.opencode/) instead of the user-level location.",
-)
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Overwrite an existing SKILL.md even if it isn't ours.",
-)
+@click.option("--project", is_flag=True, help="Install into the current repo instead of user level.")
+@click.option("--force", is_flag=True, help="Overwrite an existing SKILL.md even if it isn't ours.")
 def skill_install(tool: str, project: bool, force: bool) -> None:
     """Install the bora skill for an AI tool (claude, opencode, all)."""
     root = _project_root_or_none(project)
@@ -604,16 +545,8 @@ def skill_install(tool: str, project: bool, force: bool) -> None:
 
 @skill.command("uninstall")
 @click.argument("tool", type=click.Choice(_TOOL_CHOICES, case_sensitive=False))
-@click.option(
-    "--project",
-    is_flag=True,
-    help="Uninstall from the current repo instead of the user-level location.",
-)
-@click.option(
-    "--force",
-    is_flag=True,
-    help="Remove the skill directory even if its SKILL.md isn't ours.",
-)
+@click.option("--project", is_flag=True, help="Uninstall from the current repo instead of user level.")
+@click.option("--force", is_flag=True, help="Remove the skill directory even if its SKILL.md isn't ours.")
 def skill_uninstall(tool: str, project: bool, force: bool) -> None:
     """Uninstall the bora skill for an AI tool (claude, opencode, all)."""
     root = _project_root_or_none(project)
@@ -628,11 +561,8 @@ def skill_uninstall(tool: str, project: bool, force: bool) -> None:
 @skill.command("list")
 def skill_list() -> None:
     """Show where the bora skill is installed for each known tool."""
-    # Project root is optional here — if we're inside a repo, also show project scope.
-    from .paths import find_repo_root
     root = find_repo_root()
     rows = skill_list_status(project_root=root)
-
     width_tool = max(len(s.tool.display) for s in rows)
     width_scope = max(len(s.scope) for s in rows)
     for s in rows:
@@ -643,6 +573,130 @@ def skill_list() -> None:
         else:
             mark = "installed (foreign SKILL.md)"
         click.echo(f"{s.tool.display:<{width_tool}}  {s.scope:<{width_scope}}  {mark:<28}  {s.path}")
+
+
+# =============================================================================
+# write group
+# =============================================================================
+
+
+@main.group()
+@click.pass_context
+def write(ctx: click.Context) -> None:
+    """Write profile commands (chapters, research, status, skills)."""
+    if ctx.invoked_subcommand == "init":
+        return
+    root = find_repo_root()
+    if root is not None:
+        require_profile(root, "write", skip_check=_get_skip_flag(ctx))
+
+
+# =============================================================================
+# write init
+# =============================================================================
+
+
+@write.command("init")
+@click.option("--force", is_flag=True, help="Overwrite existing files. Use with caution.")
+def write_init(force: bool) -> None:
+    """Scaffold a write profile project (AGENTS.md, doc/ai/, Summary.md)."""
+    init_writer_project(Path.cwd(), force=force)
+
+
+# =============================================================================
+# write chapter
+# =============================================================================
+
+
+@write.command("chapter")
+@click.argument("name")
+def write_chapter(name: str) -> None:
+    """Scaffold a new chapter directory with manuscript, planning, and research files."""
+    root = find_repo_root()
+    if root is None:
+        click.echo("Error: not inside a bora write project. Run `bora write init` first.", err=True)
+        sys.exit(1)
+    create_chapter(root, name)
+
+
+# =============================================================================
+# write status
+# =============================================================================
+
+
+@write.command("status")
+def write_status() -> None:
+    """Compile project context and print a structured briefing for your AI model.
+
+    Archives any existing Summary.md to Summary/ before printing. Safe to rerun.
+    Pipe or paste the output to your AI model, then save its response as Summary.md.
+    """
+    root = find_repo_root()
+    if root is None:
+        click.echo("Error: not inside a bora write project. Run `bora write init` first.", err=True)
+        sys.exit(1)
+    click.echo(compile_write_status(root))
+
+
+# =============================================================================
+# write skill
+# =============================================================================
+
+
+@write.group(name="skill")
+def write_skill() -> None:
+    """Install or remove write-profile skills (e.g. Obsidian vault integration)."""
+
+
+@write_skill.command("install")
+@click.argument("tool", type=click.Choice(["obsidian"], case_sensitive=False))
+@click.option("--force", is_flag=True, help="Overwrite existing installation.")
+def write_skill_install(tool: str, force: bool) -> None:
+    """Install a write-profile skill (obsidian)."""
+    root = find_repo_root()
+    if root is None:
+        click.echo("Error: not inside a bora write project. Run `bora write init` first.", err=True)
+        sys.exit(1)
+    if tool == "obsidian":
+        try:
+            result = install_obsidian(root, force=force)
+        except FileExistsError as exc:
+            click.echo(str(exc), err=True)
+            sys.exit(1)
+        verb = "Updated" if result.overwritten else "Installed"
+        click.echo(f"{verb} Obsidian skill → {result.path.relative_to(root)}")
+
+
+@write_skill.command("uninstall")
+@click.argument("tool", type=click.Choice(["obsidian"], case_sensitive=False))
+@click.option("--force", is_flag=True, help="Remove even if SKILL.md is missing.")
+def write_skill_uninstall(tool: str, force: bool) -> None:
+    """Uninstall a write-profile skill (obsidian)."""
+    root = find_repo_root()
+    if root is None:
+        click.echo("Error: not inside a bora write project.", err=True)
+        sys.exit(1)
+    if tool == "obsidian":
+        result = uninstall_obsidian(root, force=force)
+        if result.removed:
+            click.echo(f"Removed Obsidian skill ({result.path.relative_to(root)})")
+        else:
+            click.echo(f"obsidian: {result.reason} ({result.path})", err=True)
+
+
+# =============================================================================
+# Deprecated top-level bora init (migration stub)
+# =============================================================================
+
+
+@main.command("init", hidden=True)
+def deprecated_init() -> None:
+    """Deprecated. Use 'bora dev init' or 'bora write init'."""
+    click.echo(
+        "⚠️  bora init is deprecated in 0.3.0.\n"
+        "Use 'bora dev init' for a developer project\n"
+        " or 'bora write init' for a writer project."
+    )
 
 
 if __name__ == "__main__":

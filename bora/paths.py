@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 # Directory layout (relative to repo root)
+PROFILE_FILE = ".bora/profile.json"
 DOCS_DIR = "docs/ai"
 TICKETS_DIR = "docs/ai/tickets"
 PROJECT_FILE = "docs/ai/Project.md"

@@ -28,3 +28,6 @@ ENV/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Project docs (bora-managed, not published)
+docs/*
