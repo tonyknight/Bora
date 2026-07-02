@@ -116,8 +116,8 @@ def test_help_hides_write_in_dev_project(runner):
         runner.invoke(main, ["dev", "init"])
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        assert "write" not in result.output
-        assert "dev" in result.output
+        assert "Write Profile Commands" not in result.output
+        assert "Dev Profile Commands" in result.output
 
 
 def test_help_hides_dev_in_write_project(runner):
@@ -127,16 +127,16 @@ def test_help_hides_dev_in_write_project(runner):
         (root / "AGENTS.md").write_text("", encoding="utf-8")
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        assert "dev" not in result.output
-        assert "write" in result.output
+        assert "Dev Profile Commands" not in result.output
+        assert "Write Profile Commands" in result.output
 
 
 def test_help_shows_both_without_profile(runner):
     with runner.isolated_filesystem():
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
-        assert "dev" in result.output
-        assert "write" in result.output
+        assert "Dev Profile Commands" in result.output
+        assert "Write Profile Commands" in result.output
 
 
 # ---------------------------------------------------------------------------

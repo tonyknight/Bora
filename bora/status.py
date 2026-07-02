@@ -13,16 +13,16 @@ from typing import Optional
 import yaml
 
 from .lint import get_blocked_tickets
-from .paths import PROJECT_FILE, TASKS_FILE
+from .paths import TASKS_FILE, find_project_file
 from .ticket import FRONTMATTER_RE, Ticket, load_all_tickets
 
 RECENT_DONE_LIMIT = 10
 
 
 def _read_focus(root: Path) -> Optional[str]:
-    """Pull the `focus` field from Project.md frontmatter, if present."""
-    project_path = root / PROJECT_FILE
-    if not project_path.exists():
+    """Pull the `focus` field from the active Project.md frontmatter, if present."""
+    project_path = find_project_file(root)
+    if project_path is None or not project_path.exists():
         return None
     text = project_path.read_text(encoding="utf-8")
     match = FRONTMATTER_RE.match(text)

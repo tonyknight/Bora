@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from typing import Optional
 
 # Directory layout (relative to repo root)
 PROFILE_FILE = ".bora/profile.json"
+PROJECT_JSON = ".bora/project.json"
 DOCS_DIR = "docs/ai"
 TICKETS_DIR = "docs/ai/tickets"
+PROJECTS_DIR = "docs/ai/Projects"
 PROJECT_FILE = "docs/ai/Project.md"
 ARCHITECTURE_FILE = "docs/ai/Architecture.md"
 TASKS_FILE = "docs/ai/Tasks.md"
 AGENTS_FILE = "AGENTS.md"
+
+_DATE_PREFIX_RE = re.compile(r"^\(\d{4}-\d{2}-\d{2}\) Project\.md$")
 
 # Valid frontmatter values
 VALID_TYPES = {"feature", "bug", "chore", "spike"}
@@ -55,3 +61,36 @@ def tickets_dir(root: Path) -> Path:
 
 def docs_dir(root: Path) -> Path:
     return root / DOCS_DIR
+
+
+def find_project_file(root: Path) -> Optional[Path]:
+    """Return the active Project.md path, or None if none exists.
+
+    Resolution order:
+      1. .bora/project.json  → "active" field
+      2. Scan docs/ai/ for (YYYY-MM-DD) Project.md — take the latest by date
+      3. Plain docs/ai/Project.md (pre-0.3.5 fallback)
+    """
+    proj_json = root / PROJECT_JSON
+    if proj_json.exists():
+        try:
+            data = json.loads(proj_json.read_text(encoding="utf-8"))
+            active = data.get("active")
+            if active:
+                candidate = root / DOCS_DIR / active
+                if candidate.exists():
+                    return candidate
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    docs = root / DOCS_DIR
+    if docs.exists():
+        candidates = [f for f in docs.iterdir() if f.is_file() and _DATE_PREFIX_RE.match(f.name)]
+        if candidates:
+            return max(candidates, key=lambda f: f.name)
+
+    plain = root / PROJECT_FILE
+    if plain.exists():
+        return plain
+
+    return None

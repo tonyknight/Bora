@@ -112,11 +112,11 @@ def test_write_status_archive_collision_suffix(runner):
         summary_dir = root / "Summary"
         summary_dir.mkdir(exist_ok=True)
 
-        # Pre-seed an archive with today's date
-        (summary_dir / f"{today} - Summary.md").write_text("old", encoding="utf-8")
+        # Pre-seed an archive with today's date using new (YYYY-MM-DD) format
+        (summary_dir / f"({today}) Summary.md").write_text("old", encoding="utf-8")
 
         # Now write a Summary.md and run status
         (root / "Summary.md").write_text("newer", encoding="utf-8")
         runner.invoke(main, ["write", "status"])
 
-        assert (summary_dir / f"{today} - Summary (1).md").exists()
+        assert (summary_dir / f"({today}) Summary (1).md").exists()

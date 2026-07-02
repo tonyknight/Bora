@@ -136,20 +136,24 @@ If you run a command in a project that has no profile yet (for example, a projec
 
 ### How it works (dev)
 
-`bora dev init` scaffolds four files and a directory:
+`bora dev init` scaffolds the project structure:
 
 ```
 AGENTS.md              ← AI agent instructions (entry point for any tool)
 docs/ai/
-  Project.md           ← what you're building and why
+  Project.md           ← what you're building and why (active project file)
   Architecture.md      ← design decisions, component layout, decision log
   Tasks.md             ← auto-generated dashboard (never hand-edit)
   tickets/             ← one Markdown file per ticket
+  Projects/            ← archived project files (created on first bora dev project)
 .bora/
   profile.json         ← profile lock (dev)
+  project.json         ← active project file pointer and version
 ```
 
 Each ticket is a Markdown file with YAML frontmatter for machine-readable state (`status`, `priority`, `depends_on`, `subtasks`) and a free-form body for human-readable context (description, acceptance criteria, notes). `Tasks.md` is regenerated from the tickets any time you run `bora dev status`.
+
+When you finish a version and start a new one, `bora dev project` archives the current `Project.md` with full metadata and opens a fresh one — preserving the history of what was built, when, and what was shipped.
 
 An AI agent reads `AGENTS.md` first, which tells it how to use the rest. It can then run `bora dev ticket set`, `bora dev ticket note`, and `bora dev lint` directly — the whole loop works from inside a model's shell.
 
@@ -183,11 +187,12 @@ bora dev context | pbcopy
 
 ### Dev commands
 
-#### Project initialisation
+#### Project initialisation and versioning
 
 | Command | What it does |
 |---------|-------------|
-| `bora dev init [tool ...]` | Scaffold `AGENTS.md`, `docs/ai/`, tickets directory, and `.bora/profile.json`. Optionally install the bora skill for one or more AI tools in the same step: `bora dev init claude`, `bora dev init all`. Add `--force` to overwrite existing files. |
+| `bora dev init [tool ...]` | Scaffold `AGENTS.md`, `docs/ai/`, tickets directory, `.bora/profile.json`, and `.bora/project.json`. Optionally install the bora skill for one or more AI tools: `bora dev init claude`, `bora dev init all`. Add `--force` to overwrite existing files. |
+| `bora dev project [version] [description]` | Archive the current `Project.md` to `docs/ai/Projects/` and create a new one. Prompts interactively for any missing arguments. See [Project versioning](#project-versioning) for details. |
 
 #### Tickets
 
@@ -264,6 +269,38 @@ The uninstall command only removes a `SKILL.md` whose frontmatter identifies it 
 |------|----------------|--------------------|
 | `claude` | `~/.claude/skills/bora/SKILL.md` | `./.claude/skills/bora/SKILL.md` |
 | `opencode` | `~/.config/opencode/skills/bora/SKILL.md` | `./.opencode/skills/bora/SKILL.md` |
+
+### Project versioning
+
+When a version ships and you're ready to start the next one, run:
+
+```bash
+bora dev project v0.4.0 "Describe what this version is for"
+```
+
+Or omit the arguments and bora prompts you:
+
+```bash
+bora dev project
+# Project version: v0.4.0
+# Project description (280 chars max): Describe what this version is for
+```
+
+What happens:
+
+1. **Archive** — the current `Project.md` is moved to `docs/ai/Projects/` with a `(YYYY-MM-DD)` date prefix added to the filename (if it doesn't already have one). The file gets archival frontmatter injected:
+   - `status: archived`
+   - `archived_date` and `archived_at_version`
+   - `completed_tickets` — list of all tickets closed during this version
+   - `git_log` — commits since the project's `start_date` (or last 50 if no start date)
+
+2. **Create** — a new `(YYYY-MM-DD) Project.md` is created at `docs/ai/` with frontmatter pre-populated:
+   - `version`, `description`, `status: open`
+   - `start_date` and `last_reviewed` set to today
+
+3. **Update pointer** — `.bora/project.json` is updated so all tools (context briefing, task dashboard) automatically pick up the new file.
+
+The `(YYYY-MM-DD)` date prefix format is used consistently across bora for all date-stamped files — project archives, Summary archives, and any other auto-named files.
 
 ### Dev conventions
 
@@ -418,11 +455,17 @@ The same flows work with local models. Smaller models (under ~14B parameters) ma
 
 ---
 
-## Upgrading from 0.2.x
+## Upgrading
 
-Bora 0.3.0 moves all commands under `bora dev` or `bora write`. The old top-level `bora init` prints a deprecation warning and exits without doing anything.
+### From 0.3.x to 0.3.5
 
-To migrate an existing project:
+0.3.5 adds `.bora/project.json` to track the active project file. New projects get it automatically via `bora dev init`. For existing 0.3.x projects, bora falls back to `docs/ai/Project.md` without a pointer file — everything keeps working. The pointer is written the first time you run `bora dev project`.
+
+Summary archives are now named `(YYYY-MM-DD) Summary.md` instead of `YYYY-MM-DD - Summary.md`. Existing archives are not renamed.
+
+### From 0.2.x to 0.3.x
+
+Bora 0.3.0 moved all commands under `bora dev` or `bora write`. The old top-level `bora init` prints a deprecation warning and exits.
 
 1. Upgrade bora:
    ```bash
@@ -434,15 +477,15 @@ To migrate an existing project:
    mkdir -p .bora
    cat > .bora/profile.json << 'EOF'
    {
-     "version": "0.3.0",
+     "version": "0.3.5",
      "profile": "dev",
-     "initialized_at": "2026-06-28T00:00:00+00:00",
+     "initialized_at": "2026-01-01T00:00:00+00:00",
      "config": { "auto_archive": true, "research_log_mode": "full_interaction" }
    }
    EOF
    ```
 
-3. That's it. All existing tickets, `docs/ai/` files, and `AGENTS.md` are untouched. Commands that used to be `bora ticket ...` are now `bora dev ticket ...`.
+3. All existing tickets, `docs/ai/` files, and `AGENTS.md` are untouched. Commands that used to be `bora ticket ...` are now `bora dev ticket ...`.
 
 ---
 
@@ -462,6 +505,7 @@ The source is in `bora/`. Here's what each module does:
 | `status.py` | `Tasks.md` generation |
 | `context.py` | Briefing assembly with optional token budget |
 | `skill.py` | Dev `SKILL.md` template and per-tool install/uninstall |
+| `dev_project.py` | `bora dev project` — archive, create, and project.json management |
 | `writer_init.py` | `bora write init` scaffolding |
 | `writer_chapter.py` | `bora write chapter` scaffolding and ID calculation |
 | `writer_status.py` | `bora write status` context compiler and Summary archival |

@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from .paths import AGENTS_FILE, ARCHITECTURE_FILE, PROJECT_FILE, TASKS_FILE
+from .paths import AGENTS_FILE, ARCHITECTURE_FILE, TASKS_FILE, find_project_file
 from .ticket import load_all_tickets
 
 CHARS_PER_TOKEN = 4  # rough estimate; favors safety
@@ -47,15 +47,25 @@ def assemble_context(root: Path, budget: Optional[int] = None) -> str:
     """
     sections: list[tuple[str, str]] = []
 
-    for label, rel_path in [
-        ("AGENTS.md", AGENTS_FILE),
-        ("docs/ai/Project.md", PROJECT_FILE),
-        ("docs/ai/Architecture.md", ARCHITECTURE_FILE),
-        ("docs/ai/Tasks.md", TASKS_FILE),
+    for label, path in [
+        ("AGENTS.md", root / AGENTS_FILE),
+        ("docs/ai/Architecture.md", root / ARCHITECTURE_FILE),
+        ("docs/ai/Tasks.md", root / TASKS_FILE),
     ]:
-        content = _read_if_exists(root / rel_path)
+        content = _read_if_exists(path)
         if content is not None:
             sections.append((label, content))
+
+    project_path = find_project_file(root)
+    if project_path is not None:
+        content = _read_if_exists(project_path)
+        if content is not None:
+            try:
+                label = str(project_path.relative_to(root))
+            except ValueError:
+                label = project_path.name
+            # Insert after AGENTS.md (position 1)
+            sections.insert(1, (label, content))
 
     # Active tickets
     tickets_dir = root / "docs/ai/tickets"

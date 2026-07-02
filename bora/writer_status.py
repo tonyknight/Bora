@@ -56,13 +56,13 @@ def _archive_summary(project_root: Path) -> Optional[Path]:
     archive_dir.mkdir(exist_ok=True)
 
     today = date.today().isoformat()
-    base_name = f"{today} - Summary.md"
+    base_name = f"({today}) Summary.md"
     dest = archive_dir / base_name
 
     # Avoid collision by appending (N)
     n = 1
     while dest.exists():
-        dest = archive_dir / f"{today} - Summary ({n}).md"
+        dest = archive_dir / f"({today}) Summary ({n}).md"
         n += 1
 
     summary.rename(dest)

@@ -30,6 +30,7 @@ from .paths import (
     require_repo_root,
     tickets_dir,
 )
+from .dev_project import archive_and_create, write_project_json
 from .profile import read_profile, require_profile, write_profile
 from .writer_chapter import create_chapter
 from .writer_init import init_writer_project
@@ -116,7 +117,7 @@ def _get_skip_flag(ctx: click.Context) -> bool:
 
 
 class _ProfileAwareGroup(click.Group):
-    """Root Click group that hides the irrelevant profile subgroup from help."""
+    """Root Click group with profile-aware help filtering and expanded command listing."""
 
     def list_commands(self, ctx: click.Context):
         commands = super().list_commands(ctx)
@@ -133,6 +134,44 @@ class _ProfileAwareGroup(click.Group):
             return [c for c in commands if c != "dev"]
         return commands
 
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        root = find_repo_root()
+        profile = None
+        if root:
+            data = read_profile(root)
+            if data:
+                profile = data.get("profile")
+        if profile != "write":
+            self._format_profile_section(ctx, formatter, "dev", "Dev Profile Commands")
+        if profile != "dev":
+            self._format_profile_section(ctx, formatter, "write", "Write Profile Commands")
+
+    def _format_profile_section(
+        self,
+        ctx: click.Context,
+        formatter: click.HelpFormatter,
+        group_name: str,
+        section_title: str,
+    ) -> None:
+        group = self.commands.get(group_name)
+        if group is None:
+            return
+        visible = [
+            (name, group.commands[name])
+            for name in group.list_commands(ctx)
+            if name in group.commands and not group.commands[name].hidden
+        ]
+        if not visible:
+            return
+        col_width = max(len(f"{group_name} {name}") for name, _ in visible)
+        limit = max(formatter.width - col_width - 6, 20)
+        rows = [
+            (f"{group_name} {name}", cmd.get_short_help_str(limit=limit))
+            for name, cmd in visible
+        ]
+        with formatter.section(section_title):
+            formatter.write_dl(rows)
+
 
 @click.group(cls=_ProfileAwareGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(version=__version__, prog_name="bora")
@@ -145,7 +184,12 @@ class _ProfileAwareGroup(click.Group):
 )
 @click.pass_context
 def main(ctx: click.Context, skip_profile_check: bool) -> None:
-    """A structured collaboration framework for human-AI projects."""
+    """A structured collaboration framework for human-AI projects.
+
+    Use 'bora dev' for software development projects (tickets, context,
+    lint) or 'bora write' for creative writing projects (chapters, status).
+    Run any command with -h for full details.
+    """
     ctx.ensure_object(dict)
     ctx.obj["skip_profile_check"] = skip_profile_check
 
@@ -184,7 +228,7 @@ def dev(ctx: click.Context) -> None:
     help="Install skills at the user level (~/.claude/) instead of inside this repo.",
 )
 def dev_init(tools: tuple, force: bool, skill_global: bool) -> None:
-    """Scaffold a dev profile project (AGENTS.md, docs/ai/, tickets).
+    """Scaffold a new dev project — AGENTS.md, tickets, docs/ai/.
 
     Optionally install the bora skill for one or more AI tools in the same
     step: bora dev init claude, bora dev init all.
@@ -200,8 +244,9 @@ def dev_init(tools: tuple, force: bool, skill_global: bool) -> None:
 
     if not force:
         existing = [p for p, _ in files_to_create if p.exists()]
-        if (root / ".bora" / "profile.json").exists():
-            existing.append(root / ".bora" / "profile.json")
+        for guard in [root / ".bora" / "profile.json", root / ".bora" / "project.json"]:
+            if guard.exists():
+                existing.append(guard)
         if existing:
             click.echo("Refusing to overwrite existing files:", err=True)
             for p in existing:
@@ -213,6 +258,9 @@ def dev_init(tools: tuple, force: bool, skill_global: bool) -> None:
 
     write_profile(root, "dev")
     click.echo("Created .bora/profile.json")
+
+    write_project_json(root, {"active": "Project.md", "version": ""})
+    click.echo("Created .bora/project.json")
 
     for path, content in files_to_create:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -249,13 +297,61 @@ def dev_init(tools: tuple, force: bool, skill_global: bool) -> None:
 
 
 # =============================================================================
+# dev project
+# =============================================================================
+
+
+@dev.command("project")
+@click.argument("version", required=False)
+@click.argument("description", required=False)
+def dev_project(version: str, description: str) -> None:
+    """Archive the current Project.md and start a new one.
+
+    Creates an archived copy in docs/ai/Projects/ with archival frontmatter
+    (completed tickets, git log, archived date), then scaffolds a fresh
+    Project.md at docs/ai/ with start date and version metadata.
+
+    \b
+    Examples:
+      bora dev project v0.3.5 "Build the write profile"
+      bora dev project          # prompts for version and description
+    """
+    if not version:
+        version = click.prompt("Project version")
+    if not description:
+        description = click.prompt("Project description (280 chars max)")
+    description = description[:280]
+
+    root = find_repo_root()
+    if root is None:
+        click.echo("Error: not inside a bora dev project. Run `bora dev init` first.", err=True)
+        sys.exit(1)
+
+    archived, new_path = archive_and_create(root, version, description)
+
+    if archived:
+        try:
+            archived_rel = archived.relative_to(root)
+        except ValueError:
+            archived_rel = archived
+        click.echo(f"Archived → {archived_rel}")
+
+    try:
+        new_rel = new_path.relative_to(root)
+    except ValueError:
+        new_rel = new_path
+    click.echo(f"Created  → {new_rel}")
+    click.echo("\nNext: edit the new Project.md to define your goals for this version.")
+
+
+# =============================================================================
 # dev ticket
 # =============================================================================
 
 
 @dev.group()
 def ticket() -> None:
-    """Manage tickets."""
+    """Create, update, list, and search tickets."""
 
 
 @ticket.command("new")
@@ -485,7 +581,7 @@ def dev_lint() -> None:
 
 @dev.group()
 def decision() -> None:
-    """Manage architecture decisions."""
+    """Record architecture decisions to Architecture.md."""
 
 
 @decision.command("new")
@@ -599,7 +695,7 @@ def write(ctx: click.Context) -> None:
 @write.command("init")
 @click.option("--force", is_flag=True, help="Overwrite existing files. Use with caution.")
 def write_init(force: bool) -> None:
-    """Scaffold a write profile project (AGENTS.md, doc/ai/, Summary.md)."""
+    """Scaffold a new write project — AGENTS.md, Summary.md, chapters/."""
     init_writer_project(Path.cwd(), force=force)
 
 
@@ -611,7 +707,7 @@ def write_init(force: bool) -> None:
 @write.command("chapter")
 @click.argument("name")
 def write_chapter(name: str) -> None:
-    """Scaffold a new chapter directory with manuscript, planning, and research files."""
+    """Create a numbered chapter directory with manuscript and research files."""
     root = find_repo_root()
     if root is None:
         click.echo("Error: not inside a bora write project. Run `bora write init` first.", err=True)
@@ -645,7 +741,7 @@ def write_status() -> None:
 
 @write.group(name="skill")
 def write_skill() -> None:
-    """Install or remove write-profile skills (e.g. Obsidian vault integration)."""
+    """Install or remove write-profile skills."""
 
 
 @write_skill.command("install")
