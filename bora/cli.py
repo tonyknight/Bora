@@ -19,15 +19,21 @@ from .lint import lint_all, lint_ticket
 from .paths import (
     AGENTS_FILE,
     ARCHITECTURE_FILE,
-    DOCS_DIR,
-    PROJECT_FILE,
-    TICKETS_DIR,
+    ProjectPathError,
     VALID_PRIORITIES,
     VALID_STATUSES,
     VALID_TYPES,
     docs_dir,
     find_repo_root,
+    parse_project_path,
+    parse_tags,
+    project_file,
+    project_name,
+    project_tickets_dir,
     require_repo_root,
+    requirements_file,
+    split_trailing_tags,
+    status_file,
     tickets_dir,
 )
 from .dev_project import archive_and_create, write_project_json
@@ -38,7 +44,7 @@ from .writer_skill import install_obsidian, uninstall_obsidian
 from .writer_status import compile_status as compile_write_status
 from .skill import TOOLS, install as install_skill, list_status as skill_list_status, uninstall as uninstall_skill
 from .status import write_tasks_md
-from .templates import AGENTS_MD, ARCHITECTURE_MD_TEMPLATE, PROJECT_MD_TEMPLATE
+from .templates import AGENTS_MD, REQUIREMENTS_MD_TEMPLATE, render_project_md
 from .ticket import find_ticket, load_all_tickets, parse_ticket
 
 
@@ -109,6 +115,23 @@ def _get_skip_flag(ctx: click.Context) -> bool:
     if isinstance(obj, dict):
         return obj.get("skip_profile_check", False)
     return False
+
+
+def _parse_init_path_and_tags(project_path: str, tags_option: Optional[str]) -> tuple[str, Optional[list[str]]]:
+    path, trailing = split_trailing_tags(project_path)
+    if tags_option and trailing:
+        click.echo("Error: pass tags via --tags or trailing [brackets], not both.", err=True)
+        sys.exit(1)
+    raw_tags = tags_option or trailing
+    parsed = parse_tags(raw_tags) if raw_tags else None
+    segments = parse_project_path(path)
+    if parsed is not None and len(parsed) != len(segments):
+        click.echo(
+            f"Error: --tags has {len(parsed)} values but path has {len(segments)} segments.",
+            err=True,
+        )
+        sys.exit(1)
+    return path, parsed
 
 
 # =============================================================================
@@ -216,37 +239,25 @@ def dev(ctx: click.Context) -> None:
 
 
 @dev.command("init")
-@click.argument(
-    "tools",
-    nargs=-1,
-    type=click.Choice(_TOOL_CHOICES, case_sensitive=False),
-)
-@click.option("--force", is_flag=True, help="Overwrite existing files. Use with caution.")
-@click.option(
-    "--skill-global",
-    is_flag=True,
-    help="Install skills at the user level (~/.claude/) instead of inside this repo.",
-)
-def dev_init(tools: tuple, force: bool, skill_global: bool) -> None:
-    """Scaffold a new dev project — AGENTS.md, tickets, docs/ai/.
+@click.argument("project_path")
+@click.option("--tags", default=None, help="CSV labels matching path segments.")
+@click.option("--force", is_flag=True, help="Overwrite existing scaffold files.")
+def dev_init(project_path: str, tags: Optional[str], force: bool) -> None:
+    """Scaffold a hierarchical dev project under docs/ai/<project_path>/."""
+    try:
+        path, parsed_tags = _parse_init_path_and_tags(project_path, tags)
+    except ProjectPathError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
 
-    Optionally install the bora skill for one or more AI tools in the same
-    step: bora dev init claude, bora dev init all.
-    """
     root = Path.cwd()
-    today = date.today().isoformat()
-
-    files_to_create = [
-        (root / AGENTS_FILE, AGENTS_MD),
-        (root / PROJECT_FILE, PROJECT_MD_TEMPLATE.format(today=today)),
-        (root / ARCHITECTURE_FILE, ARCHITECTURE_MD_TEMPLATE.format(today=today)),
-    ]
+    briefing = project_file(root, path)
+    reqs = requirements_file(root, path)
+    status = status_file(root, path)
+    tickets = project_tickets_dir(root, path)
 
     if not force:
-        existing = [p for p, _ in files_to_create if p.exists()]
-        for guard in [root / ".bora" / "profile.json", root / ".bora" / "project.json"]:
-            if guard.exists():
-                existing.append(guard)
+        existing = [p for p in (briefing, reqs, status) if p.exists()]
         if existing:
             click.echo("Refusing to overwrite existing files:", err=True)
             for p in existing:
@@ -254,46 +265,39 @@ def dev_init(tools: tuple, force: bool, skill_global: bool) -> None:
             click.echo("Use --force to overwrite.", err=True)
             sys.exit(1)
 
-    (root / TICKETS_DIR).mkdir(parents=True, exist_ok=True)
-
     write_profile(root, "dev")
     click.echo("Created .bora/profile.json")
 
-    write_project_json(root, {"active": "Project.md", "version": ""})
-    click.echo("Created .bora/project.json")
+    agents = root / AGENTS_FILE
+    if not agents.exists() or force:
+        agents.write_text(AGENTS_MD, encoding="utf-8")
+        click.echo(f"Created {AGENTS_FILE}")
 
-    for path, content in files_to_create:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        click.echo(f"Created {path.relative_to(root)}")
+    tickets.mkdir(parents=True, exist_ok=True)
+    gitkeep = tickets / ".gitkeep"
+    if not gitkeep.exists():
+        gitkeep.write_text("", encoding="utf-8")
 
-    write_tasks_md(root)
-    click.echo(f"Created {DOCS_DIR}/Tasks.md")
+    segments = parse_project_path(path)
+    name = project_name(segments)
+    today = date.today().isoformat()
+    briefing.write_text(render_project_md(list(segments), parsed_tags, today), encoding="utf-8")
+    reqs.write_text(
+        REQUIREMENTS_MD_TEMPLATE.format(today=today, project_name=name),
+        encoding="utf-8",
+    )
+    status.write_text("# Status\n\n_No tickets yet._\n", encoding="utf-8")
 
-    skill_errors = False
-    if tools:
-        skill_root = None if skill_global else root
-        for t in _resolve_tools(*tools):
-            try:
-                result = install_skill(t, project_root=skill_root, force=force)
-            except FileExistsError as exc:
-                click.echo(f"{t.display}: {exc}", err=True)
-                skill_errors = True
-                continue
-            try:
-                shown = result.path.relative_to(root)
-            except ValueError:
-                shown = result.path
-            verb = "Updated" if result.overwritten else "Installed"
-            click.echo(f"{verb} bora skill for {t.display} → {shown}")
+    click.echo(f"Created {briefing.relative_to(root)}")
+    click.echo(f"Created {reqs.relative_to(root)}")
+    click.echo(f"Created {status.relative_to(root)}")
+    click.echo(f"Created {tickets.relative_to(root)}")
 
+    shown_path = f'"{path}"' if " " in path else path
     click.echo("\nDev project scaffolded. Next steps:")
-    click.echo("  1. Edit docs/ai/Project.md to describe what you're building.")
-    click.echo("  2. Edit docs/ai/Architecture.md once design takes shape.")
-    click.echo("  3. Create your first ticket: bora dev ticket new \"<title>\"")
-
-    if skill_errors:
-        sys.exit(1)
+    click.echo(f"  1. Edit {briefing.relative_to(root)} to describe what you're building.")
+    click.echo("  2. Discuss architecture, then fill the Requirements file.")
+    click.echo(f'  3. Create your first ticket: bora dev ticket new {shown_path} "<title>"')
 
 
 # =============================================================================

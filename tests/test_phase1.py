@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ from bora.profile import read_profile, write_profile
 
 @pytest.fixture
 def runner():
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +25,7 @@ def runner():
 
 def test_dev_init_creates_profile(runner):
     with runner.isolated_filesystem() as td:
-        result = runner.invoke(main, ["dev", "init"])
+        result = runner.invoke(main, ["dev", "init", "Acme/Demo"])
         assert result.exit_code == 0, result.output
         prof = json.loads(Path(".bora/profile.json").read_text())
         assert prof["profile"] == "dev"
@@ -34,27 +35,29 @@ def test_dev_init_creates_profile(runner):
 
 def test_dev_init_creates_scaffold_files(runner):
     with runner.isolated_filesystem():
-        result = runner.invoke(main, ["dev", "init"])
+        result = runner.invoke(main, ["dev", "init", "Acme/Demo"])
         assert result.exit_code == 0, result.output
+        today = date.today().isoformat()
+        base = Path("docs/ai/Acme/Demo")
         assert Path("AGENTS.md").exists()
-        assert Path("docs/ai/Project.md").exists()
-        assert Path("docs/ai/Architecture.md").exists()
-        assert Path("docs/ai/Tasks.md").exists()
-        assert Path("docs/ai/tickets").is_dir()
+        assert (base / f"({today}) Demo.md").exists()
+        assert (base / f"({today}) Demo Requirements.md").exists()
+        assert (base / "Status.md").exists()
+        assert (base / "tickets").is_dir()
 
 
 def test_dev_init_refuses_to_overwrite_without_force(runner):
     with runner.isolated_filesystem():
-        runner.invoke(main, ["dev", "init"])
-        result = runner.invoke(main, ["dev", "init"])
+        runner.invoke(main, ["dev", "init", "Acme/Demo"])
+        result = runner.invoke(main, ["dev", "init", "Acme/Demo"])
         assert result.exit_code == 1
         assert "Refusing to overwrite" in result.stderr
 
 
 def test_dev_init_force_overwrites(runner):
     with runner.isolated_filesystem():
-        runner.invoke(main, ["dev", "init"])
-        result = runner.invoke(main, ["dev", "init", "--force"])
+        runner.invoke(main, ["dev", "init", "Acme/Demo"])
+        result = runner.invoke(main, ["dev", "init", "Acme/Demo", "--force"])
         assert result.exit_code == 0, result.output
 
 
@@ -79,7 +82,7 @@ def test_dev_command_blocked_in_write_project(runner):
 def test_write_command_blocked_in_dev_project(runner):
     with runner.isolated_filesystem() as td:
         root = Path(td)
-        runner.invoke(main, ["dev", "init"])
+        runner.invoke(main, ["dev", "init", "Acme/Demo"])
 
         # Add a placeholder write subcommand isn't possible yet (Phase 2),
         # but we can verify by patching profile to write and running dev command.
@@ -95,7 +98,7 @@ def test_write_command_blocked_in_dev_project(runner):
 def test_skip_profile_check_bypasses_locking(runner):
     with runner.isolated_filesystem() as td:
         root = Path(td)
-        runner.invoke(main, ["dev", "init"])
+        runner.invoke(main, ["dev", "init", "Acme/Demo"])
 
         # Flip to write profile
         data = json.loads((root / ".bora" / "profile.json").read_text())
@@ -113,7 +116,7 @@ def test_skip_profile_check_bypasses_locking(runner):
 
 def test_help_hides_write_in_dev_project(runner):
     with runner.isolated_filesystem():
-        runner.invoke(main, ["dev", "init"])
+        runner.invoke(main, ["dev", "init", "Acme/Demo"])
         result = runner.invoke(main, ["--help"])
         assert result.exit_code == 0
         assert "Write Profile Commands" not in result.output
