@@ -43,7 +43,7 @@ from .writer_init import init_writer_project
 from .writer_skill import install_obsidian, uninstall_obsidian
 from .writer_status import compile_status as compile_write_status
 from .skill import TOOLS, install as install_skill, list_status as skill_list_status, uninstall as uninstall_skill
-from .status import write_tasks_md
+from .status import write_status_md
 from .templates import AGENTS_MD, REQUIREMENTS_MD_TEMPLATE, render_project_frontmatter, render_project_md
 from .ticket import find_ticket, load_all_tickets, parse_ticket
 
@@ -65,14 +65,17 @@ def _open_in_editor(path: Path) -> None:
         pass
 
 
-def _regenerate_status(root: Path, *, quiet: bool = False) -> None:
-    path = write_tasks_md(root)
+def _regenerate_status(root: Path, project_path: Optional[str] = None, *, quiet: bool = False) -> None:
+    if not project_path:
+        # Ticket commands still lack project_path until Task 5.
+        return
+    path = write_status_md(root, project_path)
     if not quiet:
         try:
             rel = path.relative_to(root)
         except ValueError:
             rel = path
-        click.echo(f"Tasks.md updated → {rel}", err=True)
+        click.echo(f"Status.md updated → {rel}", err=True)
 
 
 def _print_lint_issues(issues, root: Path, header: Optional[str] = None) -> bool:
@@ -288,7 +291,7 @@ def dev_init(project_path: str, tags: Optional[str], force: bool) -> None:
         render_project_frontmatter(hierarchy, parsed_tags, today) + reqs_body,
         encoding="utf-8",
     )
-    status.write_text("# Status\n\n_No tickets yet._\n", encoding="utf-8")
+    write_status_md(root, path)
 
     click.echo(f"Created {briefing.relative_to(root)}")
     click.echo(f"Created {reqs.relative_to(root)}")
@@ -534,10 +537,16 @@ def ticket_subtask(ticket_id: str, subtask_id: str, status: str) -> None:
 
 
 @dev.command("status")
-def dev_status() -> None:
-    """Regenerate Tasks.md from current ticket state."""
+@click.argument("project_path")
+def dev_status(project_path: str) -> None:
+    """Regenerate Status.md from current ticket state."""
     root = require_repo_root()
-    path = write_tasks_md(root)
+    try:
+        parse_project_path(project_path)
+    except ProjectPathError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    path = write_status_md(root, project_path)
     click.echo(f"Wrote {path.relative_to(root)}")
 
 

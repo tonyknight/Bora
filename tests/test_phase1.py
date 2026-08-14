@@ -105,7 +105,7 @@ def test_skip_profile_check_bypasses_locking(runner):
         data["profile"] = "write"
         (root / ".bora" / "profile.json").write_text(json.dumps(data))
 
-        result = runner.invoke(main, ["--skip-profile-check", "dev", "status"])
+        result = runner.invoke(main, ["--skip-profile-check", "dev", "status", "Acme/Demo"])
         assert result.exit_code == 0, result.output
 
 
@@ -155,7 +155,7 @@ def test_upgrade_prompt_creates_profile_on_dev_choice(runner):
         (root / "docs" / "ai" / "tickets").mkdir(parents=True)
 
         # Answer 'dev' to the prompt
-        result = runner.invoke(main, ["dev", "status"], input="dev\n")
+        result = runner.invoke(main, ["dev", "status", "Acme/Demo"], input="dev\n")
         assert result.exit_code == 0, result.output
         prof = json.loads((root / ".bora" / "profile.json").read_text())
         assert prof["profile"] == "dev"
