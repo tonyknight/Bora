@@ -154,11 +154,14 @@ def test_upgrade_prompt_creates_profile_on_dev_choice(runner):
         (root / "AGENTS.md").write_text("", encoding="utf-8")
         (root / "docs" / "ai" / "tickets").mkdir(parents=True)
 
-        # Answer 'dev' to the prompt
+        # Answer 'dev' to the prompt. Profile is written before the
+        # project-briefing check; a never-inited path then exits 1.
         result = runner.invoke(main, ["dev", "lint", "Acme/Demo"], input="dev\n")
-        assert result.exit_code == 0, result.output
         prof = json.loads((root / ".bora" / "profile.json").read_text())
         assert prof["profile"] == "dev"
+        assert result.exit_code == 1
+        combined = (result.output or "") + (result.stderr or "")
+        assert "missing project briefing" in combined.lower()
 
 
 def test_upgrade_prompt_blocks_when_wrong_profile_chosen(runner):
