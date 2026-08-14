@@ -1,11 +1,20 @@
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from bora.cli import main
 
 A = "Acme/App"
 B = "Other/App"
+NEVER = "Acme/Never"
+
+NEVER_INITED_COMMANDS = [
+    ["dev", "ticket", "new", NEVER, "A ticket", "--no-edit"],
+    ["dev", "status", NEVER],
+    ["dev", "lint", NEVER],
+    ["dev", "context", NEVER],
+]
 
 
 def test_tickets_are_isolated_per_project():
@@ -51,3 +60,36 @@ def test_lint_rejects_cross_project_depends_on():
         result = runner.invoke(main, ["dev", "lint", A])
         assert result.exit_code == 1
         assert "unknown ticket" in result.stderr.lower() or "unknown" in result.stderr
+
+
+def _err(result) -> str:
+    return (result.stderr or "") + (result.output or "")
+
+
+@pytest.mark.parametrize("args", NEVER_INITED_COMMANDS)
+def test_never_inited_project_is_rejected(args):
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        assert runner.invoke(main, ["dev", "init", B]).exit_code == 0
+        result = runner.invoke(main, args)
+        assert result.exit_code == 1, result.output
+        err = _err(result).lower()
+        assert "briefing" in err
+        assert "(yyyy-mm-dd)" in err
+        assert "never.md" in err or "{projectname}.md" in err
+        assert not Path("docs/ai/Acme/Never").exists()
+
+
+def test_commands_work_after_real_init():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        assert runner.invoke(main, ["dev", "init", NEVER]).exit_code == 0
+        new = runner.invoke(main, ["dev", "ticket", "new", NEVER, "Hello", "--no-edit"])
+        assert new.exit_code == 0, new.output
+        status = runner.invoke(main, ["dev", "status", NEVER])
+        assert status.exit_code == 0, status.output
+        lint = runner.invoke(main, ["dev", "lint", NEVER])
+        assert lint.exit_code == 0, lint.output
+        ctx = runner.invoke(main, ["dev", "context", NEVER])
+        assert ctx.exit_code == 0, ctx.output
+        assert Path("docs/ai/Acme/Never").is_dir()

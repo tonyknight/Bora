@@ -22,9 +22,11 @@ from .paths import (
     VALID_PRIORITIES,
     VALID_STATUSES,
     VALID_TYPES,
+    discover_project_file,
     find_repo_root,
     parse_project_path,
     parse_tags,
+    project_dir,
     project_file,
     project_name,
     project_tickets_dir,
@@ -76,9 +78,18 @@ def _regenerate_status(root: Path, project_path: Optional[str] = None, *, quiet:
 def _dev_project(project_path: str) -> tuple[Path, str]:
     root = require_repo_root()
     try:
-        parse_project_path(project_path)
+        segments = parse_project_path(project_path)
     except ProjectPathError as exc:
         click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    directory = project_dir(root, project_path)
+    name = project_name(segments)
+    if not directory.is_dir() or discover_project_file(directory, name) is None:
+        click.echo(
+            f"Error: missing project briefing for {project_path}; "
+            f"expected '(YYYY-MM-DD) {name}.md'",
+            err=True,
+        )
         sys.exit(1)
     return root, project_path
 
