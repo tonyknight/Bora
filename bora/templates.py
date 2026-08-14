@@ -8,6 +8,11 @@ just adds setup complexity. If they grow large, split them out.
 from __future__ import annotations
 
 from datetime import date
+import re
+
+import yaml
+
+from .paths import tag_key
 
 
 AGENTS_MD = """# Agent Instructions
@@ -154,6 +159,127 @@ Technical, business, or practical constraints that shape the design.
 How will we know this project is done — or at least working?
 
 - Criterion 1
+"""
+
+
+def _normalize_project_frontmatter_dump(dumped: str) -> str:
+    """Adjust PyYAML quoting so scaffold output matches project conventions."""
+    dumped = re.sub(
+        r"last_reviewed: '(\d{4}-\d{2}-\d{2})'",
+        r"last_reviewed: \1",
+        dumped,
+    )
+    return dumped.replace("focus: ''", 'focus: ""')
+
+
+def render_project_frontmatter(hierarchy, tags, today):
+    data = {}
+    if tags:
+        for label, segment in zip(tags, hierarchy):
+            data[tag_key(label)] = segment
+        data["tags"] = list(tags)
+    data["hierarchy"] = list(hierarchy)
+    data["last_reviewed"] = today
+    data["focus"] = ""
+    dumped = yaml.safe_dump(data, sort_keys=False, allow_unicode=True).rstrip()
+    dumped = _normalize_project_frontmatter_dump(dumped)
+    return f"---\n{dumped}\n---\n"
+
+
+def render_project_md(hierarchy, tags, today):
+    body = """
+# Project
+
+## Background
+
+What is this project? Why does it exist? What's the context a stranger
+would need to understand the rest of this document?
+
+## Goals
+
+What are we trying to accomplish? List the top-level outcomes.
+
+- Goal 1
+- Goal 2
+
+## Non-goals
+
+What are we explicitly *not* doing? Naming this saves arguments later.
+
+- Non-goal 1
+
+## Target users
+
+Who is this for? What do they need? What do they already know?
+
+## User stories
+
+The concrete scenarios this product supports.
+
+- As a [user type], I want to [action], so that [outcome].
+
+## Constraints
+
+Technical, business, or practical constraints that shape the design.
+
+- Constraint 1
+
+## Success criteria
+
+How will we know this project is done — or at least working?
+
+- Criterion 1
+"""
+    return render_project_frontmatter(hierarchy, tags, today) + body
+
+
+REQUIREMENTS_MD_TEMPLATE = """---
+last_reviewed: {today}
+hierarchy: []
+---
+
+# {project_name} Requirements
+
+Placeholder. Discuss architecture with the human, then fill every section.
+
+## Overview
+
+## Goals
+
+## Non-goals
+
+## Architecture
+
+### Components
+
+### Data model
+
+### Key flows
+
+## Requirements
+
+Functional and non-functional requirements.
+
+## Acceptance criteria
+
+## Testing requirements
+
+## Commit criteria
+
+Before marking a ticket or subtask done, and before any git commit:
+
+- [ ] Subtask completion tests defined for this work have passed
+- [ ] The change meets the matching requirement and acceptance criteria
+- [ ] Build tests passed (for example `xcodebuild` on macOS/iOS; otherwise the project's equivalent tests)
+- Commit message format: `{{task name}}: {{summary of what was done}}`
+
+## Tasks Breakdown
+
+Work items that become tickets. Do not create tickets until this section is agreed.
+
+## Risks and assumptions
+
+## Open questions
 """
 
 
