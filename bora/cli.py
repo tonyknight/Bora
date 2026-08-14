@@ -233,7 +233,7 @@ def main(ctx: click.Context, skip_profile_check: bool) -> None:
 @main.group()
 @click.pass_context
 def dev(ctx: click.Context) -> None:
-    """Dev profile commands (tickets, status, lint, context, decisions, skills)."""
+    """Dev profile commands (tickets, status, lint, context, skills)."""
     if ctx.invoked_subcommand == "init":
         return
     root = find_repo_root()
@@ -251,7 +251,13 @@ def dev(ctx: click.Context) -> None:
 @click.option("--tags", default=None, help="CSV labels matching path segments.")
 @click.option("--force", is_flag=True, help="Overwrite existing scaffold files.")
 def dev_init(project_path: str, tags: Optional[str], force: bool) -> None:
-    """Scaffold a hierarchical dev project under docs/ai/<project_path>/."""
+    """Scaffold a hierarchical dev project under docs/ai/<project_path>/.
+
+    PROJECT_PATH is required (Codebase/Target/Project, depth >= 2).
+    Creates a dated project briefing, a dated Requirements file,
+    Status.md, and tickets/ inside that path. Writes root AGENTS.md
+    only if it does not already exist (use --force to overwrite it).
+    """
     try:
         path, parsed_tags = _parse_init_path_and_tags(project_path, tags)
     except ProjectPathError as exc:
@@ -520,7 +526,7 @@ def ticket_subtask(project_path: str, ticket_id: str, subtask_id: str, status: s
 @dev.command("status")
 @click.argument("project_path")
 def dev_status(project_path: str) -> None:
-    """Regenerate Status.md from current ticket state."""
+    """Regenerate Status.md from current ticket state for PROJECT_PATH."""
     root, project_path = _dev_project(project_path)
     path = write_status_md(root, project_path)
     click.echo(f"Wrote {path.relative_to(root)}")

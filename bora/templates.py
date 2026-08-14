@@ -20,91 +20,165 @@ AGENTS_MD = """# Agent Instructions
 ## Philosophy
 
 This project uses a structured collaboration framework. Documentation in
-`docs/ai/` is your shared workspace with the human. You read it to get
-oriented, you propose updates to it as work progresses, and you treat it
-as the source of truth about project state.
+`docs/ai/<Codebase>/<Target>/<Project>/` is your per-project shared
+workspace. Multiple projects may coexist under `docs/ai/`. You read the
+referenced project to get oriented, you propose updates as work
+progresses, and you treat that project's files as the source of truth
+about its state.
+
+The project briefing and Requirements files are dated and named after
+the project: `(YYYY-MM-DD) {ProjectName}.md` and
+`(YYYY-MM-DD) {ProjectName} Requirements.md`. `Status.md` is
+auto-generated — never hand-edit it.
 
 Three principles:
 
-1. **`Tasks.md` is auto-generated.** Never edit it directly. Update tickets
-   instead, then run `bora status` to regenerate.
-2. **`Project.md` and `Architecture.md` are collaborative.** Propose changes
-   in conversation; don't edit silently.
-3. **Tickets are where work happens.** Update their status, notes, and
-   subtasks as you progress.
+1. **`Status.md` is auto-generated.** Never edit it directly. Update
+   tickets instead, then run `bora dev status <project_path>` to
+   regenerate.
+2. **The project briefing and Requirements file are collaborative.**
+   Discuss architecture with the human before writing Requirements.
+   Propose changes in conversation; don't edit silently.
+3. **Tickets are where work happens.** Create them from the Requirements
+   Tasks Breakdown only after architecture is agreed. Update their
+   status, notes, and subtasks as you progress.
 
 ## Briefing sequence
 
 When you join a session with no prior context, read in this order:
 
-1. This file (`AGENTS.md`)
-2. `docs/ai/Project.md` — what we're building and why
-3. `docs/ai/Architecture.md` — how we've decided to build it
-4. `docs/ai/Tasks.md` — current state of work
-5. Specific files in `docs/ai/tickets/` as the active work demands
+1. AGENTS.md (root — this file)
+2. The human-referenced project briefing:
+   `docs/ai/<path>/(YYYY-MM-DD) {ProjectName}.md`
+3. Discuss architecture with the human before writing Requirements.
+   Do not skip this conversation. Do not fill in the Requirements
+   file from Project.md alone.
+4. After agreement, author/update:
+   `docs/ai/<path>/(YYYY-MM-DD) {ProjectName} Requirements.md`
+5. `docs/ai/<path>/Status.md`  (read only — never hand-edit)
+6. When implementing: create tickets from the Requirements
+   Tasks Breakdown. Tickets may be worked by one or more agents.
+7. `docs/ai/<path>/tickets/<id>.md` as the active work demands
+8. If budget-constrained, run `bora dev context <path> --budget N`
 
-If your context budget is tight, run `bora context --budget <tokens>`
-to get a token-bounded briefing.
+## Scope guardrail
+
+**Scope guardrail:** The human will reference the correct `docs/ai/<path>/(YYYY-MM-DD) {ProjectName}.md` when starting the session. Only read and write files inside that project's directory (`docs/ai/<path>/` and its `tickets/`). Do not operate on other `docs/ai/<other>/` projects, the legacy flat `docs/ai/Project.md`, or the repo root unless the human explicitly references them. `Status.md` is per-project only — do not expect or create a root `docs/ai/Status.md` or `docs/ai/Tasks.md` aggregation. All `bora dev` commands require the explicit `<project_path>` argument to enforce this.
+
+## Layout
+
+```
+docs/
+  ai/
+    <Codebase>/
+      <Target>/
+        <Project>/
+          (YYYY-MM-DD) {ProjectName}.md
+          (YYYY-MM-DD) {ProjectName} Requirements.md
+          Status.md
+          tickets/
+            .gitkeep
+            <id>.md
+```
+
+Example (`bora dev init "QromaCore/Hamburg/Gallery Refactor"` on 2026-08-14):
+
+```
+docs/
+  ai/
+    QromaCore/
+      Hamburg/
+        Gallery Refactor/
+          (2026-08-14) Gallery Refactor.md
+          (2026-08-14) Gallery Refactor Requirements.md
+          Status.md
+          tickets/
+            .gitkeep
+```
 
 ## Workflows
 
-### Starting a new feature
+### Orient, then Requirements, then tickets
 
-1. Read `Project.md` and `Architecture.md` to confirm scope.
-2. Propose an implementation plan in conversation with the human.
-3. Once agreed, create one or more tickets via `bora ticket new`.
-4. If the feature decomposes, use `--parent` to link child tickets.
-5. Populate each ticket's Description, Acceptance criteria, Context, and
-   Subtasks (frontmatter for major subtasks; body checkboxes for small ones).
+1. Read the referenced project briefing and confirm scope with the human.
+2. Discuss architecture: components, data model, key flows, constraints,
+   non-goals. Propose options; wait for agreement.
+3. Write or update `(YYYY-MM-DD) {ProjectName} Requirements.md`:
+   architecture, requirements, acceptance criteria, testing
+   requirements, commit criteria, Tasks Breakdown, risks, and open
+   questions. Bump `last_reviewed`.
+4. Only then create tickets from the Tasks Breakdown:
+   `bora dev ticket new <project_path> "<title>"`.
+   `<project_path>` is the same value passed to `bora dev init`.
+   Use `--parent` when a breakdown item splits.
+5. Tickets may be assigned in conversation to one or more agents; each
+   agent still stays inside this project directory and updates only the
+   tickets it is working.
+6. After ticket changes, run `bora dev status <project_path>` so
+   `Status.md` reflects current work.
+7. Before marking a ticket or subtask `done`, and before any git
+   commit, satisfy **Commit criteria** in the Requirements file: the
+   subtask's completion tests pass, the change meets the requirement,
+   and build/tests pass (including platform builds such as macOS/iOS
+   when that is the target). Commit message format:
+   `{task name}: {summary of what was done}`.
 
 ### Resuming work on an existing ticket
 
-1. Run `bora ticket show <id>` (or read the file directly).
+1. Run `bora dev ticket show <project_path> <id>` (or read the file
+   directly). Example:
+   `bora dev ticket show QromaCore/Hamburg/Gallery\\ Refactor 20260811-01`
 2. Check the latest entry in the body Notes section.
 3. Check subtask checkboxes for what's already done.
 4. If status is `todo`, set it to `in-progress`:
-   `bora ticket set <id> status in-progress`.
-5. Append a dated Notes entry when you make meaningful progress.
+   `bora dev ticket set <project_path> <id> status in-progress`.
+5. Append a dated Notes entry when you make meaningful progress:
+   `bora dev ticket note <project_path> <id> "<text>"`.
+6. After ticket changes, run `bora dev status <project_path>`.
+   Example: `bora dev status QromaCore/Hamburg/Gallery\\ Refactor`.
 
 ### Marking a ticket complete
 
-1. Verify all acceptance criteria are met.
-2. Verify all body checkboxes are checked.
-3. Run `bora ticket set <id> status done`.
-4. The `closed` date populates automatically.
-
-### Proposing changes to `Project.md` or `Architecture.md`
-
-1. State the change you want to make and why.
-2. Wait for human confirmation.
-3. Update the file, including bumping its `last_reviewed` date in the
-   frontmatter.
-4. If the change invalidates open tickets, flag this explicitly and
-   propose what to do (close, revise, or split).
+1. Before `bora dev ticket set <project_path> <id> status done` (or
+   setting a subtask to `done`), run the Commit criteria checks in the
+   Requirements file: completion tests pass, the change meets the
+   requirement, and build/tests pass.
+2. Verify all acceptance criteria are met and all body checkboxes are
+   checked.
+3. Then set status: `bora dev ticket set <project_path> <id> status done`.
+   The `closed` date populates automatically.
+4. If the human wants a commit, use message
+   `{task name}: {summary of what was done}`. Do not commit if build or
+   completion tests failed.
 
 ### Recording an architectural decision
 
-1. Append a dated entry to the "Decision log" section at the bottom of
-   `Architecture.md`. Or run `bora decision new "<title>"` to scaffold one.
-2. Include: what was decided, alternatives considered, and reasoning.
+There is no decision command. After agreeing with the human, edit the
+project's Requirements file directly (typically under Architecture or
+Open questions).
 
 ## Validation
 
-After any write to a ticket file, run `bora lint`. Don't trust your own
-YAML output without verification — it catches frontmatter errors before
-they corrupt project state.
+After any write to a ticket file, run `bora dev lint <project_path>`,
+then `bora dev status <project_path>`. Don't trust your own YAML output
+without verification — lint catches frontmatter errors before they
+corrupt project state.
 
 ## Frontmatter reference
 
+Tickets live at `docs/ai/<path>/tickets/<id>.md`. Ticket IDs are unique
+per-project, not repo-global.
+
 Ticket frontmatter fields:
 
-- `id` — `YYYYMMDD-NN-slug` format. Set by `bora ticket new`; don't change.
+- `id` — `YYYYMMDD-NN-slug` format. Set by
+  `bora dev ticket new <project_path> "<title>"`; don't change.
 - `title` — short human-readable title.
 - `type` — `feature` | `bug` | `chore` | `spike`.
 - `priority` — `high` | `medium` | `low`.
 - `status` — `todo` | `in-progress` | `blocked` | `done`.
 - `created`, `updated`, `closed` — ISO dates. Managed by the CLI.
-- `notes` — one-line current state, shown in `Tasks.md`.
+- `notes` — one-line current state, shown in `Status.md`.
 - `parent` — single ticket id, or empty.
 - `depends_on` — list of ticket ids that must be `done` first.
 - `subtasks` — list of `{id, title, status}` for major subtasks.
@@ -562,13 +636,14 @@ What is this ticket and why does it exist?
 
 ## Context
 
-Links to relevant code, prior tickets, decisions in `Architecture.md`,
-or anything else a model working on this would need to know.
+Links to relevant code, prior tickets, decisions in the project's
+Requirements file, or anything else a model working on this would need
+to know.
 
 ## Subtasks
 
 Detailed checklist. Major subtasks should also appear in the frontmatter
-`subtasks` field so they show up in `Tasks.md`.
+`subtasks` field so they show up in `Status.md`.
 
 ## Notes
 

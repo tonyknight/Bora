@@ -13,7 +13,7 @@ Bora fixes this by maintaining a small, structured set of Markdown files inside 
 
 Bora 0.3.0 ships two isolated **profiles**:
 
-- **`dev`** — for software projects: tickets, architecture decisions, task dashboards, and AI tool skill integration.
+- **`dev`** — for software projects: hierarchical tickets, a dated Requirements spec, per-project status dashboards, and AI tool skill integration.
 - **`write`** — for writing projects: chapter scaffolding, research interaction logs, story context, and summary generation.
 
 ---
@@ -35,7 +35,7 @@ Bora 0.3.0 ships two isolated **profiles**:
   - [Obsidian integration](#obsidian-integration)
   - [Conventions](#write-conventions)
 - [Working across models](#working-across-models)
-- [Upgrading from 0.2.x](#upgrading-from-02x)
+- [Upgrading](#upgrading)
 - [Contributing](#contributing)
 
 ---
@@ -123,7 +123,7 @@ Every bora project has a **profile** stored in `.bora/profile.json`. The profile
 
 | Profile | Initialise with | Designed for |
 |---------|----------------|-------------|
-| `dev` | `bora dev init` | Software development |
+| `dev` | `bora dev init <project_path>` | Software development |
 | `write` | `bora write init` | Writing projects |
 
 Bora enforces profile isolation: running a `dev` command in a `write` project (or vice versa) exits with a clear error. This keeps the two workflows from interfering with each other.
@@ -136,88 +136,103 @@ If you run a command in a project that has no profile yet (for example, a projec
 
 ### How it works (dev)
 
-`bora dev init` scaffolds the project structure:
+`bora dev init <project_path>` scaffolds one project under a hierarchical path. Multiple projects may coexist under `docs/ai/`. There is no active-project pointer — every command takes an explicit `<project_path>`.
+
+Example: `bora dev init "QromaCore/Hamburg/Gallery Refactor"` on 2026-08-14 yields:
 
 ```
-AGENTS.md              ← AI agent instructions (entry point for any tool)
-docs/ai/
-  Project.md           ← what you're building and why (active project file)
-  Architecture.md      ← design decisions, component layout, decision log
-  Tasks.md             ← auto-generated dashboard (never hand-edit)
-  tickets/             ← one Markdown file per ticket
-  Projects/            ← archived project files (created on first bora dev project)
+AGENTS.md              ← AI agent instructions (repo root only)
+docs/
+  ai/
+    QromaCore/
+      Hamburg/
+        Gallery Refactor/
+          (2026-08-14) Gallery Refactor.md              ← project briefing
+          (2026-08-14) Gallery Refactor Requirements.md ← architecture + spec
+          Status.md                                     ← auto-generated dashboard
+          tickets/
+            .gitkeep
 .bora/
   profile.json         ← profile lock (dev)
-  project.json         ← active project file pointer and version
 ```
 
-Each ticket is a Markdown file with YAML frontmatter for machine-readable state (`status`, `priority`, `depends_on`, `subtasks`) and a free-form body for human-readable context (description, acceptance criteria, notes). `Tasks.md` is regenerated from the tickets any time you run `bora dev status`.
+Deeper paths are valid too: `bora dev init Acme/Platform/Auth/OAuth Refresh` (depth 4). `{ProjectName}` is the last segment.
 
-When you finish a version and start a new one, `bora dev project` archives the current `Project.md` with full metadata and opens a fresh one — preserving the history of what was built, when, and what was shipped.
+The dated briefing describes **what** is being built and **why**. After the human and agent discuss architecture, they fill the sibling Requirements file — that document is the per-project spec and the source of tickets (from its Tasks Breakdown). `Status.md` is regenerated from that project's tickets any time you run `bora dev status <project_path>`. Never hand-edit it.
 
-An AI agent reads `AGENTS.md` first, which tells it how to use the rest. It can then run `bora dev ticket set`, `bora dev ticket note`, and `bora dev lint` directly — the whole loop works from inside a model's shell.
+Each ticket is a Markdown file under `docs/ai/<path>/tickets/` with YAML frontmatter for machine-readable state (`status`, `priority`, `depends_on`, `subtasks`) and a free-form body for human-readable context (description, acceptance criteria, notes). Ticket IDs are unique per-project, not repo-global.
+
+An AI agent reads root `AGENTS.md` first (scope guardrail and Requirements workflow), then the human-referenced project briefing. It can run `bora dev ticket set <project_path> …`, `bora dev ticket note <project_path> …`, and `bora dev lint <project_path>` directly — the whole loop works from inside a model's shell.
 
 ### Quick start (dev)
 
 ```bash
-# Start in your project directory (existing or new)
-cd /path/to/my-project
+# Start in your repo (existing or new)
+cd /path/to/my-codebase
 
-# Scaffold the project and install the bora skill for Claude Code
-bora dev init claude
+# Scaffold a hierarchical project (quoted form; spaces are one segment)
+bora dev init "QromaCore/Hamburg/Gallery Refactor" --tags Codebase,"Release Train",Project
+
+# Same path, shell-escaped, without tags (frontmatter gets hierarchy only)
+bora dev init QromaCore/Hamburg/Gallery\ Refactor
 
 # Fill in what you're building
-$EDITOR docs/ai/Project.md
+$EDITOR "docs/ai/QromaCore/Hamburg/Gallery Refactor/(2026-08-14) Gallery Refactor.md"
 
-# Create a ticket
-bora dev ticket new "Implement login flow" --priority high
+# Discuss architecture with your agent, then fill the Requirements file.
+# Do not create tickets until the Tasks Breakdown is agreed.
+
+# Create a ticket from the Requirements Tasks Breakdown
+bora dev ticket new "QromaCore/Hamburg/Gallery Refactor" "Implement login flow" --priority high
 
 # Mark it in-progress (fuzzy ID match — no need to type the full ID)
-bora dev ticket set 01 status in-progress
+bora dev ticket set "QromaCore/Hamburg/Gallery Refactor" 01 status in-progress
 
 # Add a note as work progresses
-bora dev ticket note 01 "Auth service wired up, still need session handling"
+bora dev ticket note "QromaCore/Hamburg/Gallery Refactor" 01 "Auth service wired up, still need session handling"
 
-# Regenerate the task dashboard
-bora dev status
+# Regenerate the per-project status dashboard
+bora dev status "QromaCore/Hamburg/Gallery Refactor"
 
 # Brief a fresh model session (pipe to clipboard)
-bora dev context | pbcopy
+bora dev context "QromaCore/Hamburg/Gallery Refactor" | pbcopy
 ```
+
+Missing `<project_path>` is an error. There is no active-project fallback.
 
 ### Dev commands
 
-#### Project initialisation and versioning
+#### Project initialisation
 
 | Command | What it does |
 |---------|-------------|
-| `bora dev init [tool ...]` | Scaffold `AGENTS.md`, `docs/ai/`, tickets directory, `.bora/profile.json`, and `.bora/project.json`. Optionally install the bora skill for one or more AI tools: `bora dev init claude`, `bora dev init all`. Add `--force` to overwrite existing files. |
-| `bora dev project [version] [description]` | Archive the current `Project.md` to `docs/ai/Projects/` and create a new one. Prompts interactively for any missing arguments. See [Project versioning](#project-versioning) for details. |
+| `bora dev init <project_path> [--tags …] [--force]` | Scaffold a dated project briefing, dated Requirements file, `Status.md`, and `tickets/` under `docs/ai/<project_path>/`. Writes root `AGENTS.md` only if it is missing (use `--force` to overwrite it). `--tags` is a CSV of labels matching path segments, for example `--tags Codebase,"Release Train",Project`. |
+
+##### Removed in 0.4.5
+
+- **`bora dev project`** — versioning and `docs/ai/Projects/` archival are gone. Hierarchy and optional tags are set at init: `bora dev init <project_path> --tags …`.
+- **`bora dev decision`** — record decisions in the project's Requirements file (typically under Architecture or Open questions).
 
 #### Tickets
 
+Every ticket command requires `<project_path>` first. Missing it is an error.
+
 | Command | What it does |
 |---------|-------------|
-| `bora dev ticket new "<title>"` | Create a new ticket. Options: `--type` (feature/bug/chore/spike), `--priority` (high/medium/low), `--parent <id>` (for child tickets), `--no-edit` (skip opening `$EDITOR`). |
-| `bora dev ticket list` | List all tickets in a table. Filters: `--status`, `--type`, `--priority`, `--blocked`. |
-| `bora dev ticket show <id>` | Print a ticket's full contents. Fuzzy ID match: `01` matches `20260628-01-my-ticket`. |
-| `bora dev ticket set <id> <field> <value>` | Update a frontmatter field. Settable fields: `title`, `type`, `priority`, `status`, `notes`, `parent`. Setting `status done` auto-populates the closed date. |
-| `bora dev ticket note <id> "<text>"` | Append a dated entry to a ticket's Notes section. Use this to record progress without rewriting the whole file. |
-| `bora dev ticket subtask <id> <subtask-id> <status>` | Update a frontmatter subtask's status (todo/in-progress/done). |
+| `bora dev ticket new <project_path> "<title>"` | Create a new ticket. Options: `--type` (feature/bug/chore/spike), `--priority` (high/medium/low), `--parent <id>` (for child tickets), `--no-edit` (skip opening `$EDITOR`). |
+| `bora dev ticket list <project_path>` | List tickets in that project. Filters: `--status`, `--type`, `--priority`, `--blocked`. |
+| `bora dev ticket show <project_path> <id>` | Print a ticket's full contents. Fuzzy ID match: `01` matches `20260628-01-my-ticket`. |
+| `bora dev ticket set <project_path> <id> <field> <value>` | Update a frontmatter field. Settable fields: `title`, `type`, `priority`, `status`, `notes`, `parent`. Setting `status done` auto-populates the closed date. |
+| `bora dev ticket note <project_path> <id> "<text>"` | Append a dated entry to a ticket's Notes section. Use this to record progress without rewriting the whole file. |
+| `bora dev ticket subtask <project_path> <id> <subtask-id> <status>` | Update a frontmatter subtask's status (todo/in-progress/done). |
 
 #### Project state
 
 | Command | What it does |
 |---------|-------------|
-| `bora dev status` | Regenerate `docs/ai/Tasks.md` from the current ticket state. |
-| `bora dev context [--budget N]` | Print briefing content for a fresh model session — all the files an agent should read, in order. Pass `--budget <tokens>` to get a token-bounded version. |
-| `bora dev lint` | Validate frontmatter and cross-references across all tickets. Run this after any model writes to a ticket file. |
-
-#### Architecture decisions
-
-| Command | What it does |
-|---------|-------------|
-| `bora dev decision new "<title>"` | Append a dated, templated decision entry to `Architecture.md` and open it in `$EDITOR`. |
+| `bora dev status <project_path>` | Regenerate that project's `Status.md` from its ticket state. |
+| `bora dev context <project_path> [--budget N]` | Print briefing content for a fresh model session — root `AGENTS.md` plus that project's dated briefing, Requirements, `Status.md`, and in-progress/blocked tickets. Pass `--budget <tokens>` to get a token-bounded version. |
+| `bora dev lint <project_path>` | Validate frontmatter and cross-references across that project's tickets. Run this after any model writes to a ticket file. |
 
 #### AI tool skills
 
@@ -229,17 +244,9 @@ bora dev context | pbcopy
 
 ### AI tool skills
 
-Claude Code, OpenCode, and other agentic tools support **skills** — directories containing a `SKILL.md` that the agent loads when its description matches the current task. Bora ships a skill that tells the agent how to use the CLI and maintain the `docs/ai/` files correctly.
+Claude Code, OpenCode, and other agentic tools support **skills** — directories containing a `SKILL.md` that the agent loads when its description matches the current task. Bora ships a skill that tells the agent how to use the CLI and maintain the hierarchical `docs/ai/` files correctly.
 
-Install as part of `bora dev init`:
-
-```bash
-bora dev init claude         # scaffold + skill for Claude Code
-bora dev init claude opencode  # scaffold + both tools
-bora dev init all            # scaffold + all known tools
-```
-
-Or install the skill on its own (after `bora dev init`):
+Install the skill after `bora dev init <project_path>`:
 
 ```bash
 # User-level — available in every project
@@ -270,45 +277,14 @@ The uninstall command only removes a `SKILL.md` whose frontmatter identifies it 
 | `claude` | `~/.claude/skills/bora/SKILL.md` | `./.claude/skills/bora/SKILL.md` |
 | `opencode` | `~/.config/opencode/skills/bora/SKILL.md` | `./.opencode/skills/bora/SKILL.md` |
 
-### Project versioning
-
-When a version ships and you're ready to start the next one, run:
-
-```bash
-bora dev project v0.4.0 "Describe what this version is for"
-```
-
-Or omit the arguments and bora prompts you:
-
-```bash
-bora dev project
-# Project version: v0.4.0
-# Project description (280 chars max): Describe what this version is for
-```
-
-What happens:
-
-1. **Archive** — the current `Project.md` is moved to `docs/ai/Projects/` with a `(YYYY-MM-DD)` date prefix added to the filename (if it doesn't already have one). The file gets archival frontmatter injected:
-   - `status: archived`
-   - `archived_date` and `archived_at_version`
-   - `completed_tickets` — list of all tickets closed during this version
-   - `git_log` — commits since the project's `start_date` (or last 50 if no start date)
-
-2. **Create** — a new `(YYYY-MM-DD) Project.md` is created at `docs/ai/` with frontmatter pre-populated:
-   - `version`, `description`, `status: open`
-   - `start_date` and `last_reviewed` set to today
-
-3. **Update pointer** — `.bora/project.json` is updated so all tools (context briefing, task dashboard) automatically pick up the new file.
-
-The `(YYYY-MM-DD)` date prefix format is used consistently across bora for all date-stamped files — project archives, Summary archives, and any other auto-named files.
-
 ### Dev conventions
 
-- **Ticket IDs are generated, not chosen.** The format is `YYYYMMDD-NN-slug`. Never rename ticket files — the ID is the source of truth for `depends_on` and `parent` references.
-- **`Tasks.md` is auto-generated.** Never hand-edit it. Update tickets and run `bora dev status`.
-- **Subtasks live in two places by design.** Major subtasks appear in frontmatter (`subtasks:` list) — they're queryable and visible in `Tasks.md`. Small subtasks are Markdown checkboxes in the ticket body — they're counted but not individually tracked.
-- **Decisions are append-only.** Add new entries to `Architecture.md`; don't rewrite old ones. History matters.
-- **`AGENTS.md` is the entry point.** AI tools that support `AGENTS.md` (Claude Code, Cursor, others) load it automatically. It tells the agent what the project is, how to work, and what commands to use.
+- **Ticket IDs are generated, not chosen.** The format is `YYYYMMDD-NN-slug`. Never rename ticket files — the ID is the source of truth for `depends_on` and `parent` references. IDs are unique per-project, not repo-global.
+- **`Status.md` is per-project and auto-generated.** Never hand-edit it. Update tickets and run `bora dev status <project_path>`. There is no root `docs/ai/Status.md` aggregation.
+- **`AGENTS.md` is root-only.** It contains the scope guardrail and the discuss-architecture → write Requirements → create tickets workflow. Init writes it once; it is not overwritten unless you pass `--force`.
+- **Subtasks live in two places by design.** Major subtasks appear in frontmatter (`subtasks:` list) — they're queryable and visible in `Status.md`. Small subtasks are Markdown checkboxes in the ticket body — they're counted but not individually tracked.
+- **Decisions live in the Requirements file.** After agreeing with the human, edit Architecture or Open questions in the dated Requirements file. There is no decision command.
+- **No migration for flat layouts.** 0.4.5 does not convert `docs/ai/Project.md` trees. New work uses hierarchical `docs/ai/<path>/` projects.
 
 ---
 
@@ -441,27 +417,33 @@ Bora is model-agnostic. It produces plain Markdown and YAML that any LLM can rea
 
 **Chat-only models** (web Claude, ChatGPT, Gemini, etc.)
 
-For dev projects, run `bora dev context --budget <N>` and paste the output as your first message. The model gets the same complete briefing every time.
+For dev projects, run `bora dev context <project_path> --budget <N>` and paste the output as your first message. The model gets the same complete briefing every time.
 
 For write projects, run `bora write status` and paste the output. Ask the model to generate a `Summary.md` and save its response.
 
 **Agentic tools with file access** (Claude Code, Cursor, Aider, etc.)
 
-The model reads `AGENTS.md` and follows its instructions to discover the rest. For dev projects, the agent can run `bora dev ticket set`, `bora dev lint`, and `bora dev status` directly from its shell as work progresses.
+The model reads `AGENTS.md` and follows its instructions to discover the rest. For dev projects, the agent can run `bora dev ticket set <project_path> …`, `bora dev lint <project_path>`, and `bora dev status <project_path>` directly from its shell as work progresses.
 
 **Local models**
 
-The same flows work with local models. Smaller models (under ~14B parameters) may occasionally produce malformed YAML frontmatter in ticket or planning files. Run `bora dev lint` after any model writes to a ticket file to catch these early.
+The same flows work with local models. Smaller models (under ~14B parameters) may occasionally produce malformed YAML frontmatter in ticket or planning files. Run `bora dev lint <project_path>` after any model writes to a ticket file to catch these early.
 
 ---
 
 ## Upgrading
 
+### From 0.3.x to 0.4.5
+
+0.4.5 replaces the flat `docs/ai/Project.md` layout with hierarchical `docs/ai/<Codebase>/<Target>/<Project>/` projects. Every `dev` command takes an explicit `<project_path>`. There is no active-project pointer and no `bora dev project` / `bora dev decision` command.
+
+New work: `bora dev init <project_path> [--tags …]`. That creates a dated briefing, a dated Requirements file, per-project `Status.md`, and `tickets/`. There is no migration for existing flat trees — start a new hierarchical project alongside them if you still have the old files.
+
 ### From 0.3.x to 0.3.5
 
-0.3.5 adds `.bora/project.json` to track the active project file. New projects get it automatically via `bora dev init`. For existing 0.3.x projects, bora falls back to `docs/ai/Project.md` without a pointer file — everything keeps working. The pointer is written the first time you run `bora dev project`.
+0.3.5 added `.bora/project.json` to track the active project file. That pointer is unused in 0.4.5 hierarchical projects; `<project_path>` is authoritative.
 
-Summary archives are now named `(YYYY-MM-DD) Summary.md` instead of `YYYY-MM-DD - Summary.md`. Existing archives are not renamed.
+Summary archives are named `(YYYY-MM-DD) Summary.md` instead of `YYYY-MM-DD - Summary.md`. Existing archives are not renamed.
 
 ### From 0.2.x to 0.3.x
 
@@ -497,15 +479,14 @@ The source is in `bora/`. Here's what each module does:
 |------|---------|
 | `cli.py` | Click command surface — `dev` and `write` subgroups, profile-aware help filtering |
 | `profile.py` | `.bora/profile.json` read/write/lock, upgrade prompt |
-| `paths.py` | Repo-root detection and shared path constants |
+| `paths.py` | Repo-root detection, hierarchical project-path validation, and resolvers |
 | `templates.py` | All scaffolded file templates (dev and write) |
 | `ticket.py` | Frontmatter parsing, fuzzy ID matching, body progress tracking |
 | `create.py` | Chronological ticket ID generation |
 | `lint.py` | Frontmatter validation rules |
-| `status.py` | `Tasks.md` generation |
-| `context.py` | Briefing assembly with optional token budget |
+| `status.py` | Per-project `Status.md` generation |
+| `context.py` | Project-scoped briefing assembly with optional token budget |
 | `skill.py` | Dev `SKILL.md` template and per-tool install/uninstall |
-| `dev_project.py` | `bora dev project` — archive, create, and project.json management |
 | `writer_init.py` | `bora write init` scaffolding |
 | `writer_chapter.py` | `bora write chapter` scaffolding and ID calculation |
 | `writer_status.py` | `bora write status` context compiler and Summary archival |
@@ -521,11 +502,11 @@ To manually smoke-test a dev project:
 
 ```bash
 mkdir /tmp/test-bora && cd /tmp/test-bora && git init
-bora dev init
-bora dev ticket new "Test ticket" --priority high --no-edit
-bora dev ticket set 01 status in-progress
-bora dev status
-bora dev lint
+bora dev init Acme/App
+bora dev ticket new Acme/App "Test ticket" --priority high --no-edit
+bora dev ticket set Acme/App 01 status in-progress
+bora dev status Acme/App
+bora dev lint Acme/App
 ```
 
 To smoke-test a write project:
