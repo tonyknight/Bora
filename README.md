@@ -158,7 +158,7 @@ docs/
 
 Deeper paths are valid too: `bora dev init Acme/Platform/Auth/OAuth Refresh` (depth 4). `{ProjectName}` is the last segment.
 
-The dated briefing describes **what** is being built and **why**. After the human and agent discuss architecture, they fill the sibling Requirements file — that document is the per-project spec and the source of tickets (from its Tasks Breakdown). `Status.md` is regenerated from that project's tickets any time you run `bora dev status <project_path>`. Never hand-edit it.
+The dated briefing describes **what** is being built and **why**. After the human and agent discuss architecture, they fill the sibling Requirements file — that document is the per-project spec and the source of tickets (from its Tasks Breakdown). `Status.md` is regenerated from that project's tickets any time you run `bora dev status <project_path>`. Never hand-edit it. Before marking a ticket `done` or committing, follow **Commit criteria** in the Requirements file (see [Dev conventions](#dev-conventions)).
 
 Each ticket is a Markdown file under `docs/ai/<path>/tickets/` with YAML frontmatter for machine-readable state (`status`, `priority`, `depends_on`, `subtasks`) and a free-form body for human-readable context (description, acceptance criteria, notes). Ticket IDs are unique per-project, not repo-global.
 
@@ -281,6 +281,7 @@ The uninstall command only removes a `SKILL.md` whose frontmatter identifies it 
 
 - **Ticket IDs are generated, not chosen.** The format is `YYYYMMDD-NN-slug`. Never rename ticket files — the ID is the source of truth for `depends_on` and `parent` references. IDs are unique per-project, not repo-global.
 - **`Status.md` is per-project and auto-generated.** Never hand-edit it. Update tickets and run `bora dev status <project_path>`. There is no root `docs/ai/Status.md` aggregation.
+- **Commit criteria gate done work and git commits.** Before marking a ticket or subtask `done`, and before any git commit, satisfy the **Commit criteria** section of that project's Requirements file: the subtask's completion tests pass, the change meets the requirement, and build/tests pass (including platform builds such as macOS/iOS when that is the target). Commit message format: `{task name}: {summary of what was done}`. Bora does not create git commits; this is agent workflow.
 - **`AGENTS.md` is root-only.** It contains the scope guardrail and the discuss-architecture → write Requirements → create tickets workflow. Init writes it once; it is not overwritten unless you pass `--force`.
 - **Subtasks live in two places by design.** Major subtasks appear in frontmatter (`subtasks:` list) — they're queryable and visible in `Status.md`. Small subtasks are Markdown checkboxes in the ticket body — they're counted but not individually tracked.
 - **Decisions live in the Requirements file.** After agreeing with the human, edit Architecture or Open questions in the dated Requirements file. There is no decision command.
