@@ -11,13 +11,6 @@ from typing import Optional
 
 # Directory layout (relative to repo root)
 PROFILE_FILE = ".bora/profile.json"
-PROJECT_JSON = ".bora/project.json"
-DOCS_DIR = "docs/ai"
-TICKETS_DIR = "docs/ai/tickets"
-PROJECTS_DIR = "docs/ai/Projects"
-PROJECT_FILE = "docs/ai/Project.md"
-ARCHITECTURE_FILE = "docs/ai/Architecture.md"
-TASKS_FILE = "docs/ai/Tasks.md"
 AGENTS_FILE = "AGENTS.md"
 
 # Valid frontmatter values
@@ -53,14 +46,6 @@ def require_repo_root() -> Path:
             "or run this command from within an initialized project."
         )
     return root
-
-
-def tickets_dir(root: Path) -> Path:
-    return root / TICKETS_DIR
-
-
-def docs_dir(root: Path) -> Path:
-    return root / DOCS_DIR
 
 
 class ProjectPathError(ValueError):

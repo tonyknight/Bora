@@ -2,9 +2,14 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from bora import __version__
 from bora.cli import main
 from bora.skill import BORA_SKILL_MD
 from bora.templates import AGENTS_MD, ticket_template
+
+
+def test_version_is_045():
+    assert __version__ == "0.4.5"
 
 
 def test_agents_md_has_scope_guardrail_and_status():

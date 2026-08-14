@@ -11,7 +11,7 @@ Whether you're a developer building software with an AI coding agent, or a write
 
 Bora fixes this by maintaining a small, structured set of Markdown files inside your project. Any model — any tool — can read them to get oriented in seconds. The files travel with your project, stay in version control, and are always the authoritative source of what's happening and why.
 
-Bora 0.3.0 ships two isolated **profiles**:
+Bora 0.4.5 ships two isolated **profiles**:
 
 - **`dev`** — for software projects: hierarchical tickets, a dated Requirements spec, per-project status dashboards, and AI tool skill integration.
 - **`write`** — for writing projects: chapter scaffolding, research interaction logs, story context, and summary generation.

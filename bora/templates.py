@@ -357,65 +357,6 @@ Work items that become tickets. Do not create tickets until this section is agre
 """
 
 
-ARCHITECTURE_MD_TEMPLATE = """---
-last_reviewed: {today}
----
-
-# Architecture
-
-## Overview
-
-One or two paragraphs describing the shape of the system at a high level.
-What are the main pieces? How do they fit together?
-
-## Components
-
-Break the system into its parts. For each, describe what it does and how
-it relates to the others.
-
-### Component A
-
-What it does. Key interfaces or boundaries.
-
-### Component B
-
-What it does. Key interfaces or boundaries.
-
-## Data model
-
-Key entities, their relationships, and how state is persisted.
-
-## Key flows
-
-Walk through the most important user-facing or system-level interactions.
-
-### Flow 1: [name]
-
-1. Step
-2. Step
-
-## Open questions
-
-Things we haven't decided yet. Each entry should have enough context that
-a model joining mid-project understands what's at stake.
-
-- Question 1
-- Question 2
-
-## Decision log
-
-Append-only record of architectural decisions. Each entry is dated.
-Include: what was decided, alternatives considered, and reasoning.
-
-### {today} — Initial scaffolding
-
-Decided to use the bora framework for project documentation and ticketing.
-Alternatives considered: ad-hoc Markdown notes, Notion, Linear. Chose bora
-because it lives in the repo, is editable by AI agents, and is designed
-for context portability across model sessions.
-"""
-
-
 WRITER_AGENTS_MD = """# Bora Writer Agent Instructions
 
 ## Role & Boundaries
