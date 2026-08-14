@@ -42,6 +42,14 @@ def test_init_scaffolds_dated_files(runner):
         assert not Path("docs/ai/Project.md").exists()
         assert not Path("docs/ai/Architecture.md").exists()
         assert not Path("docs/ai/Tasks.md").exists()
+        reqs = (base / f"({today}) Gallery Refactor Requirements.md").read_text()
+        assert "hierarchy:" in reqs
+        assert "- QromaCore" in reqs
+        assert "- Hamburg" in reqs
+        assert "- Gallery Refactor" in reqs
+        assert "hierarchy: []" not in reqs
+        assert "codebase:" not in reqs
+        assert "tags:" not in reqs
 
 
 def test_init_tags_frontmatter(runner):
@@ -52,11 +60,16 @@ def test_init_tags_frontmatter(runner):
         )
         assert result.exit_code == 0, result.output
         today = date.today().isoformat()
-        text = Path(
-            f"docs/ai/QromaCore/Hamburg/Gallery Refactor/({today}) Gallery Refactor.md"
-        ).read_text()
+        base = Path("docs/ai/QromaCore/Hamburg/Gallery Refactor")
+        text = (base / f"({today}) Gallery Refactor.md").read_text()
         assert "codebase: QromaCore" in text
         assert "release_train: Hamburg" in text
+        reqs = (base / f"({today}) Gallery Refactor Requirements.md").read_text()
+        assert "codebase: QromaCore" in reqs
+        assert "release_train: Hamburg" in reqs
+        assert "project: Gallery Refactor" in reqs
+        assert "tags:" in reqs
+        assert "- QromaCore" in reqs
 
 
 def test_init_tag_count_mismatch(runner):

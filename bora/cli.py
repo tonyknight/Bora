@@ -44,7 +44,7 @@ from .writer_skill import install_obsidian, uninstall_obsidian
 from .writer_status import compile_status as compile_write_status
 from .skill import TOOLS, install as install_skill, list_status as skill_list_status, uninstall as uninstall_skill
 from .status import write_tasks_md
-from .templates import AGENTS_MD, REQUIREMENTS_MD_TEMPLATE, render_project_md
+from .templates import AGENTS_MD, REQUIREMENTS_MD_TEMPLATE, render_project_frontmatter, render_project_md
 from .ticket import find_ticket, load_all_tickets, parse_ticket
 
 
@@ -281,9 +281,11 @@ def dev_init(project_path: str, tags: Optional[str], force: bool) -> None:
     segments = parse_project_path(path)
     name = project_name(segments)
     today = date.today().isoformat()
-    briefing.write_text(render_project_md(list(segments), parsed_tags, today), encoding="utf-8")
+    hierarchy = list(segments)
+    briefing.write_text(render_project_md(hierarchy, parsed_tags, today), encoding="utf-8")
+    reqs_body = REQUIREMENTS_MD_TEMPLATE.split("---", 2)[-1].format(project_name=name)
     reqs.write_text(
-        REQUIREMENTS_MD_TEMPLATE.format(today=today, project_name=name),
+        render_project_frontmatter(hierarchy, parsed_tags, today) + reqs_body,
         encoding="utf-8",
     )
     status.write_text("# Status\n\n_No tickets yet._\n", encoding="utf-8")
