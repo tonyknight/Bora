@@ -18,7 +18,6 @@ from .create import create_ticket
 from .lint import lint_all
 from .paths import (
     AGENTS_FILE,
-    ARCHITECTURE_FILE,
     ProjectPathError,
     VALID_PRIORITIES,
     VALID_STATUSES,
@@ -34,7 +33,6 @@ from .paths import (
     split_trailing_tags,
     status_file,
 )
-from .dev_project import archive_and_create, write_project_json
 from .profile import read_profile, require_profile, write_profile
 from .writer_chapter import create_chapter
 from .writer_init import init_writer_project
@@ -317,47 +315,15 @@ def dev_init(project_path: str, tags: Optional[str], force: bool) -> None:
 # =============================================================================
 
 
-@dev.command("project")
-@click.argument("version", required=False)
-@click.argument("description", required=False)
-def dev_project(version: str, description: str) -> None:
-    """Archive the current Project.md and start a new one.
-
-    Creates an archived copy in docs/ai/Projects/ with archival frontmatter
-    (completed tickets, git log, archived date), then scaffolds a fresh
-    Project.md at docs/ai/ with start date and version metadata.
-
-    \b
-    Examples:
-      bora dev project v0.3.5 "Build the write profile"
-      bora dev project          # prompts for version and description
-    """
-    if not version:
-        version = click.prompt("Project version")
-    if not description:
-        description = click.prompt("Project description (280 chars max)")
-    description = description[:280]
-
-    root = find_repo_root()
-    if root is None:
-        click.echo("Error: not inside a bora dev project. Run `bora dev init` first.", err=True)
-        sys.exit(1)
-
-    archived, new_path = archive_and_create(root, version, description)
-
-    if archived:
-        try:
-            archived_rel = archived.relative_to(root)
-        except ValueError:
-            archived_rel = archived
-        click.echo(f"Archived → {archived_rel}")
-
-    try:
-        new_rel = new_path.relative_to(root)
-    except ValueError:
-        new_rel = new_path
-    click.echo(f"Created  → {new_rel}")
-    click.echo("\nNext: edit the new Project.md to define your goals for this version.")
+@dev.command("project", hidden=True)
+@click.argument("args", nargs=-1)
+def dev_project(args: tuple[str, ...]) -> None:
+    """Removed in 0.4.5 — use bora dev init <path> --tags ..."""
+    click.echo(
+        "bora dev project is removed in 0.4.5 — use bora dev init <path> --tags ...",
+        err=True,
+    )
+    sys.exit(1)
 
 
 # =============================================================================
@@ -606,33 +572,15 @@ def dev_lint(project_path: str) -> None:
 # =============================================================================
 
 
-@dev.group()
-def decision() -> None:
-    """Record architecture decisions to Architecture.md."""
-
-
-@decision.command("new")
-@click.argument("title")
-def decision_new(title: str) -> None:
-    """Append a new decision entry to Architecture.md and open it."""
-    root = require_repo_root()
-    arch_path = root / ARCHITECTURE_FILE
-    if not arch_path.exists():
-        click.echo(f"Error: {ARCHITECTURE_FILE} does not exist. Run `bora dev init` first.", err=True)
-        sys.exit(1)
-    today = date.today().isoformat()
-    entry = (
-        f"\n### {today} — {title}\n\n"
-        "**What was decided:** \n\n"
-        "**Alternatives considered:** \n\n"
-        "**Reasoning:** \n"
+@dev.command("decision", hidden=True)
+@click.argument("args", nargs=-1)
+def dev_decision(args: tuple[str, ...]) -> None:
+    """Removed in 0.4.5 — record decisions in the project's Requirements file."""
+    click.echo(
+        "bora dev decision is removed in 0.4.5 — record decisions in the project's Requirements file",
+        err=True,
     )
-    existing = arch_path.read_text(encoding="utf-8")
-    if not existing.endswith("\n"):
-        existing += "\n"
-    arch_path.write_text(existing + entry, encoding="utf-8")
-    click.echo(f"Appended decision entry to {ARCHITECTURE_FILE}")
-    _open_in_editor(arch_path)
+    sys.exit(1)
 
 
 # =============================================================================
