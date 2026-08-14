@@ -13,7 +13,7 @@ from bora.cli import main
 
 @pytest.fixture
 def runner():
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 def test_write_init_creates_profile(runner):

@@ -12,7 +12,7 @@ from bora.cli import main
 
 @pytest.fixture
 def runner():
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 def _setup_write_project(runner):

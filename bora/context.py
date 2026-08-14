@@ -11,10 +11,17 @@ is conservative — actual token counts will usually be smaller.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from .paths import AGENTS_FILE, ARCHITECTURE_FILE, TASKS_FILE, find_project_file
+from .paths import (
+    AGENTS_FILE,
+    project_file,
+    project_tickets_dir,
+    requirements_file,
+    status_file,
+)
 from .ticket import load_all_tickets
 
 CHARS_PER_TOKEN = 4  # rough estimate; favors safety
@@ -30,16 +37,36 @@ def _read_if_exists(path: Path) -> Optional[str]:
     return None
 
 
-def assemble_context(root: Path, budget: Optional[int] = None) -> str:
-    """Assemble briefing content.
+def _label_for(root: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return path.name
+
+
+def _append_if_exists(
+    sections: list[tuple[str, str]],
+    root: Path,
+    path: Path,
+    label: Optional[str] = None,
+) -> None:
+    content = _read_if_exists(path)
+    if content is None:
+        return
+    sections.append((label or _label_for(root, path), content))
+
+
+def assemble_context(root: Path, project_path: str, budget: Optional[int] = None) -> str:
+    """Assemble briefing content for one hierarchical project.
 
     Order of inclusion (highest priority first):
-      1. AGENTS.md
-      2. Project.md
-      3. Architecture.md
-      4. Tasks.md
-      5. In-progress tickets (most recently updated first)
-      6. Blocked tickets
+      1. AGENTS.md (repo root)
+      2. dated project briefing (discovered)
+      3. dated Requirements (if exists)
+      4. Status.md (if exists)
+      5. In-progress tickets, then blocked tickets, in that project's tickets/
+
+    Does not read other `docs/ai/<other>/` trees.
 
     If a budget is given, we include files in order until the budget is
     exhausted, then stop. We always include AGENTS.md regardless of budget
@@ -47,42 +74,23 @@ def assemble_context(root: Path, budget: Optional[int] = None) -> str:
     """
     sections: list[tuple[str, str]] = []
 
-    for label, path in [
-        ("AGENTS.md", root / AGENTS_FILE),
-        ("docs/ai/Architecture.md", root / ARCHITECTURE_FILE),
-        ("docs/ai/Tasks.md", root / TASKS_FILE),
-    ]:
-        content = _read_if_exists(path)
-        if content is not None:
-            sections.append((label, content))
+    _append_if_exists(sections, root, root / AGENTS_FILE, label="AGENTS.md")
+    _append_if_exists(sections, root, project_file(root, project_path))
+    _append_if_exists(sections, root, requirements_file(root, project_path))
+    _append_if_exists(sections, root, status_file(root, project_path))
 
-    project_path = find_project_file(root)
-    if project_path is not None:
-        content = _read_if_exists(project_path)
-        if content is not None:
-            try:
-                label = str(project_path.relative_to(root))
-            except ValueError:
-                label = project_path.name
-            # Insert after AGENTS.md (position 1)
-            sections.insert(1, (label, content))
+    tickets = load_all_tickets(project_tickets_dir(root, project_path))
+    in_progress = [t for t in tickets if t.status == "in-progress"]
+    blocked = [t for t in tickets if t.status == "blocked"]
 
-    # Active tickets
-    tickets_dir = root / "docs/ai/tickets"
-    active_tickets = [
-        t for t in load_all_tickets(tickets_dir)
-        if t.status in {"in-progress", "blocked"}
-    ]
-    active_tickets.sort(
-        key=lambda t: (t.updated or t.created or __import__("datetime").date.min),
-        reverse=True,
-    )
-    for t in active_tickets:
-        try:
-            rel = t.path.relative_to(root)
-        except ValueError:
-            rel = t.path
-        sections.append((str(rel), t.path.read_text(encoding="utf-8")))
+    def _recency(ticket) -> date:
+        return ticket.updated or ticket.created or date.min
+
+    in_progress.sort(key=_recency, reverse=True)
+    blocked.sort(key=_recency, reverse=True)
+
+    for t in in_progress + blocked:
+        sections.append((_label_for(root, t.path), t.path.read_text(encoding="utf-8")))
 
     # Apply budget if provided
     if budget is not None:

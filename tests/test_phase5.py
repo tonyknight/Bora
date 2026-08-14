@@ -13,7 +13,7 @@ from bora.cli import main
 
 @pytest.fixture
 def runner():
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 # ---------------------------------------------------------------------------
@@ -119,33 +119,34 @@ def test_deprecated_init_prints_warning(runner):
 def test_e2e_dev_workflow(runner):
     with runner.isolated_filesystem() as td:
         root = Path(td)
+        A = "Acme/App"
 
         # Init
-        result = runner.invoke(main, ["dev", "init"])
+        result = runner.invoke(main, ["dev", "init", A])
         assert result.exit_code == 0, result.output
         assert (root / ".bora" / "profile.json").exists()
 
         # Create a ticket
-        result = runner.invoke(main, ["dev", "ticket", "new", "My first ticket", "--no-edit"])
+        result = runner.invoke(main, ["dev", "ticket", "new", A, "My first ticket", "--no-edit"])
         assert result.exit_code == 0, result.output
 
         # List tickets
-        result = runner.invoke(main, ["dev", "ticket", "list"])
+        result = runner.invoke(main, ["dev", "ticket", "list", A])
         assert result.exit_code == 0, result.output
         assert "My first ticket" in result.output
 
         # Set status
-        ticket_id = next((root / "docs" / "ai" / "tickets").iterdir()).stem
-        result = runner.invoke(main, ["dev", "ticket", "set", ticket_id, "status", "in-progress"])
+        ticket_id = next((root / "docs" / "ai" / "Acme" / "App" / "tickets").glob("*.md")).stem
+        result = runner.invoke(main, ["dev", "ticket", "set", A, ticket_id, "status", "in-progress"])
         assert result.exit_code == 0, result.output
 
         # Lint
-        result = runner.invoke(main, ["dev", "lint"])
+        result = runner.invoke(main, ["dev", "lint", A])
         assert result.exit_code == 0, result.output
         assert "OK" in result.output
 
         # Status
-        result = runner.invoke(main, ["dev", "status"])
+        result = runner.invoke(main, ["dev", "status", A])
         assert result.exit_code == 0, result.output
 
 

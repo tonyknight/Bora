@@ -69,10 +69,13 @@ def test_write_tasks_md_raises():
         write_tasks_md(Path("."))
 
 
-def test_ticket_new_skips_status_regenerate_until_task_5():
+def test_ticket_new_regenerates_status_md():
     runner = CliRunner()
     with runner.isolated_filesystem():
         runner.invoke(main, ["dev", "init", SAMPLE])
-        result = runner.invoke(main, ["dev", "ticket", "new", "A ticket", "--no-edit"])
+        result = runner.invoke(main, ["dev", "ticket", "new", SAMPLE, "A ticket", "--no-edit"])
         assert result.exit_code == 0, result.output
         assert not Path("docs/ai/Tasks.md").exists()
+        status = Path("docs/ai/Acme/Auth/Status.md").read_text()
+        assert "A ticket" in status
+        assert "Status.md updated" in result.stderr

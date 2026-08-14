@@ -74,7 +74,7 @@ def test_dev_command_blocked_in_write_project(runner):
         (root / "AGENTS.md").write_text("", encoding="utf-8")
         (root / "docs" / "ai" / "tickets").mkdir(parents=True)
 
-        result = runner.invoke(main, ["dev", "status"])
+        result = runner.invoke(main, ["dev", "status", "Acme/Demo"])
         assert result.exit_code == 1
         assert "Profile locked" in result.stderr
 
@@ -90,7 +90,7 @@ def test_write_command_blocked_in_dev_project(runner):
         data["profile"] = "write"
         (root / ".bora" / "profile.json").write_text(json.dumps(data))
 
-        result = runner.invoke(main, ["dev", "status"])
+        result = runner.invoke(main, ["dev", "status", "Acme/Demo"])
         assert result.exit_code == 1
         assert "Profile locked" in result.stderr
 
@@ -155,7 +155,7 @@ def test_upgrade_prompt_creates_profile_on_dev_choice(runner):
         (root / "docs" / "ai" / "tickets").mkdir(parents=True)
 
         # Answer 'dev' to the prompt
-        result = runner.invoke(main, ["dev", "status", "Acme/Demo"], input="dev\n")
+        result = runner.invoke(main, ["dev", "lint", "Acme/Demo"], input="dev\n")
         assert result.exit_code == 0, result.output
         prof = json.loads((root / ".bora" / "profile.json").read_text())
         assert prof["profile"] == "dev"
@@ -168,6 +168,6 @@ def test_upgrade_prompt_blocks_when_wrong_profile_chosen(runner):
         (root / "docs" / "ai" / "tickets").mkdir(parents=True)
 
         # Answer 'write' when running a dev command — should block
-        result = runner.invoke(main, ["dev", "status"], input="write\n")
+        result = runner.invoke(main, ["dev", "lint", "Acme/Demo"], input="write\n")
         assert result.exit_code == 1
         assert "Profile locked" in result.stderr

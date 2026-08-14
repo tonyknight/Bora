@@ -15,7 +15,7 @@ import click
 from . import __version__
 from .context import assemble_context, estimate_tokens
 from .create import create_ticket
-from .lint import lint_all, lint_ticket
+from .lint import lint_all
 from .paths import (
     AGENTS_FILE,
     ARCHITECTURE_FILE,
@@ -23,7 +23,6 @@ from .paths import (
     VALID_PRIORITIES,
     VALID_STATUSES,
     VALID_TYPES,
-    docs_dir,
     find_repo_root,
     parse_project_path,
     parse_tags,
@@ -34,7 +33,6 @@ from .paths import (
     requirements_file,
     split_trailing_tags,
     status_file,
-    tickets_dir,
 )
 from .dev_project import archive_and_create, write_project_json
 from .profile import read_profile, require_profile, write_profile
@@ -67,7 +65,6 @@ def _open_in_editor(path: Path) -> None:
 
 def _regenerate_status(root: Path, project_path: Optional[str] = None, *, quiet: bool = False) -> None:
     if not project_path:
-        # Ticket commands still lack project_path until Task 5.
         return
     path = write_status_md(root, project_path)
     if not quiet:
@@ -76,6 +73,16 @@ def _regenerate_status(root: Path, project_path: Optional[str] = None, *, quiet:
         except ValueError:
             rel = path
         click.echo(f"Status.md updated → {rel}", err=True)
+
+
+def _dev_project(project_path: str) -> tuple[Path, str]:
+    root = require_repo_root()
+    try:
+        parse_project_path(project_path)
+    except ProjectPathError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    return root, project_path
 
 
 def _print_lint_issues(issues, root: Path, header: Optional[str] = None) -> bool:
@@ -364,6 +371,7 @@ def ticket() -> None:
 
 
 @ticket.command("new")
+@click.argument("project_path")
 @click.argument("title")
 @click.option(
     "--type", "ticket_type",
@@ -373,31 +381,33 @@ def ticket() -> None:
 @click.option("--priority", type=click.Choice(sorted(VALID_PRIORITIES)), default="medium", show_default=True)
 @click.option("--parent", default="", help="Parent ticket id (for child tickets).")
 @click.option("--no-edit", is_flag=True, help="Don't open the new ticket in $EDITOR.")
-def ticket_new(title: str, ticket_type: str, priority: str, parent: str, no_edit: bool) -> None:
-    """Create a new ticket."""
-    root = require_repo_root()
+def ticket_new(project_path: str, title: str, ticket_type: str, priority: str, parent: str, no_edit: bool) -> None:
+    """Create a new ticket in a project's tickets/ directory."""
+    root, project_path = _dev_project(project_path)
+    tdir = project_tickets_dir(root, project_path)
     if parent:
-        parent_ticket = find_ticket(tickets_dir(root), parent)
+        parent_ticket = find_ticket(tdir, parent)
         if parent_ticket is None:
             click.echo(f"Error: parent ticket not found: {parent}", err=True)
             sys.exit(1)
         parent = parent_ticket.id
-    path = create_ticket(tickets_dir(root), title=title, ticket_type=ticket_type, priority=priority, parent=parent)
+    path = create_ticket(tdir, title=title, ticket_type=ticket_type, priority=priority, parent=parent)
     click.echo(f"Created {path.relative_to(root)}")
     if not no_edit:
         _open_in_editor(path)
-    _regenerate_status(root)
+    _regenerate_status(root, project_path)
 
 
 @ticket.command("list")
+@click.argument("project_path")
 @click.option("--status", type=click.Choice(sorted(VALID_STATUSES)), help="Filter by status.")
 @click.option("--type", "ticket_type", type=click.Choice(sorted(VALID_TYPES)), help="Filter by type.")
 @click.option("--priority", type=click.Choice(sorted(VALID_PRIORITIES)), help="Filter by priority.")
 @click.option("--blocked", is_flag=True, help="Show only tickets with unfinished dependencies.")
-def ticket_list(status: Optional[str], ticket_type: Optional[str], priority: Optional[str], blocked: bool) -> None:
+def ticket_list(project_path: str, status: Optional[str], ticket_type: Optional[str], priority: Optional[str], blocked: bool) -> None:
     """List tickets in a table."""
-    root = require_repo_root()
-    tickets = load_all_tickets(tickets_dir(root))
+    root, project_path = _dev_project(project_path)
+    tickets = load_all_tickets(project_tickets_dir(root, project_path))
 
     if status:
         tickets = [t for t in tickets if t.status == status]
@@ -434,11 +444,12 @@ def ticket_list(status: Optional[str], ticket_type: Optional[str], priority: Opt
 
 
 @ticket.command("show")
+@click.argument("project_path")
 @click.argument("ticket_id")
-def ticket_show(ticket_id: str) -> None:
+def ticket_show(project_path: str, ticket_id: str) -> None:
     """Print a ticket's full contents (fuzzy id match)."""
-    root = require_repo_root()
-    t = find_ticket(tickets_dir(root), ticket_id)
+    root, project_path = _dev_project(project_path)
+    t = find_ticket(project_tickets_dir(root, project_path), ticket_id)
     if t is None:
         click.echo(f"No ticket matched: {ticket_id}", err=True)
         sys.exit(1)
@@ -446,13 +457,15 @@ def ticket_show(ticket_id: str) -> None:
 
 
 @ticket.command("set")
+@click.argument("project_path")
 @click.argument("ticket_id")
 @click.argument("field")
 @click.argument("value")
-def ticket_set(ticket_id: str, field: str, value: str) -> None:
+def ticket_set(project_path: str, ticket_id: str, field: str, value: str) -> None:
     """Update a frontmatter field on a ticket."""
-    root = require_repo_root()
-    t = find_ticket(tickets_dir(root), ticket_id)
+    root, project_path = _dev_project(project_path)
+    tdir = project_tickets_dir(root, project_path)
+    t = find_ticket(tdir, ticket_id)
     if t is None:
         click.echo(f"No ticket matched: {ticket_id}", err=True)
         sys.exit(1)
@@ -472,7 +485,7 @@ def ticket_set(ticket_id: str, field: str, value: str) -> None:
         click.echo(f"Error: invalid status {value!r}. Expected one of {sorted(VALID_STATUSES)}", err=True)
         sys.exit(1)
     if field == "parent" and value:
-        parent = find_ticket(tickets_dir(root), value)
+        parent = find_ticket(tdir, value)
         if parent is None:
             click.echo(f"Error: parent ticket not found: {value}", err=True)
             sys.exit(1)
@@ -486,34 +499,36 @@ def ticket_set(ticket_id: str, field: str, value: str) -> None:
             t.frontmatter["closed"] = None
     t.save()
     click.echo(f"Updated {t.id}: {field} = {value}")
-    _regenerate_status(root)
+    _regenerate_status(root, project_path)
 
 
 @ticket.command("note")
+@click.argument("project_path")
 @click.argument("ticket_id")
 @click.argument("text")
-def ticket_note(ticket_id: str, text: str) -> None:
+def ticket_note(project_path: str, ticket_id: str, text: str) -> None:
     """Append a dated entry to a ticket's body Notes section."""
-    root = require_repo_root()
-    t = find_ticket(tickets_dir(root), ticket_id)
+    root, project_path = _dev_project(project_path)
+    t = find_ticket(project_tickets_dir(root, project_path), ticket_id)
     if t is None:
         click.echo(f"No ticket matched: {ticket_id}", err=True)
         sys.exit(1)
     t.append_note(text)
     t.save()
     click.echo(f"Appended note to {t.id}")
-    _regenerate_status(root)
+    _regenerate_status(root, project_path)
 
 
 @ticket.command("subtask")
+@click.argument("project_path")
 @click.argument("ticket_id")
 @click.argument("subtask_id")
 @click.argument("status")
-def ticket_subtask(ticket_id: str, subtask_id: str, status: str) -> None:
+def ticket_subtask(project_path: str, ticket_id: str, subtask_id: str, status: str) -> None:
     """Update a frontmatter subtask's status."""
     from .paths import VALID_SUBTASK_STATUSES
-    root = require_repo_root()
-    t = find_ticket(tickets_dir(root), ticket_id)
+    root, project_path = _dev_project(project_path)
+    t = find_ticket(project_tickets_dir(root, project_path), ticket_id)
     if t is None:
         click.echo(f"No ticket matched: {ticket_id}", err=True)
         sys.exit(1)
@@ -528,7 +543,7 @@ def ticket_subtask(ticket_id: str, subtask_id: str, status: str) -> None:
         sys.exit(1)
     t.save()
     click.echo(f"Updated {t.id}: subtask {subtask_id} = {status}")
-    _regenerate_status(root)
+    _regenerate_status(root, project_path)
 
 
 # =============================================================================
@@ -540,12 +555,7 @@ def ticket_subtask(ticket_id: str, subtask_id: str, status: str) -> None:
 @click.argument("project_path")
 def dev_status(project_path: str) -> None:
     """Regenerate Status.md from current ticket state."""
-    root = require_repo_root()
-    try:
-        parse_project_path(project_path)
-    except ProjectPathError as exc:
-        click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
+    root, project_path = _dev_project(project_path)
     path = write_status_md(root, project_path)
     click.echo(f"Wrote {path.relative_to(root)}")
 
@@ -556,16 +566,17 @@ def dev_status(project_path: str) -> None:
 
 
 @dev.command("context")
+@click.argument("project_path")
 @click.option("--budget", type=int, default=None, help="Maximum approximate token count.")
-def dev_context(budget: Optional[int]) -> None:
+def dev_context(project_path: str, budget: Optional[int]) -> None:
     """Print briefing content for a fresh model session.
 
     Pipe to your clipboard or paste into a chat to brief a model:
-        bora dev context | pbcopy
-        bora dev context --budget 8000
+        bora dev context <project_path> | pbcopy
+        bora dev context <project_path> --budget 8000
     """
-    root = require_repo_root()
-    content = assemble_context(root, budget=budget)
+    root, project_path = _dev_project(project_path)
+    content = assemble_context(root, project_path, budget=budget)
     click.echo(content, nl=False)
     if budget is not None:
         click.echo(f"\n[~{estimate_tokens(content)} tokens, budget {budget}]", err=True)
@@ -577,10 +588,11 @@ def dev_context(budget: Optional[int]) -> None:
 
 
 @dev.command("lint")
-def dev_lint() -> None:
-    """Validate frontmatter and cross-references across all tickets."""
-    root = require_repo_root()
-    issues = lint_all(tickets_dir(root))
+@click.argument("project_path")
+def dev_lint(project_path: str) -> None:
+    """Validate frontmatter and cross-references across a project's tickets."""
+    root, project_path = _dev_project(project_path)
+    issues = lint_all(project_tickets_dir(root, project_path))
     if not issues:
         click.echo("OK — no issues found.")
         return
