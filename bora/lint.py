@@ -17,6 +17,7 @@ from .paths import (
     VALID_SUBTASK_STATUSES,
     VALID_TYPES,
 )
+from .plan import VALID_PLAN_STATUSES, extract_plan_section, parse_plan_tasks
 from .ticket import Ticket, load_all_tickets, parse_ticket
 
 
@@ -128,6 +129,36 @@ def lint_ticket(ticket: Ticket, known_ids: set[str]) -> list[LintIssue]:
                     f"subtask #{i} has invalid status: {sub_status!r} "
                     f"(expected one of {sorted(VALID_SUBTASK_STATUSES)})"
                 ))
+
+    section = extract_plan_section(ticket.body)
+    plan_status = fm.get("plan_status")
+    if plan_status not in (None, "") and plan_status not in VALID_PLAN_STATUSES:
+        issues.append(LintIssue(
+            p, "error",
+            f"invalid plan_status: {plan_status!r} "
+            f"(expected one of {sorted(VALID_PLAN_STATUSES)})"
+        ))
+
+    if section is not None:
+        tasks = parse_plan_tasks(section)
+        seen_tasks: set[str] = set()
+        for task in tasks:
+            if task.id in seen_tasks:
+                issues.append(LintIssue(p, "error", f"duplicate plan task id: {task.id}"))
+            else:
+                seen_tasks.add(task.id)
+        current = fm.get("current_task") or ""
+        if current and current not in seen_tasks:
+            issues.append(LintIssue(
+                p, "error",
+                f"current_task {current!r} is not a task id in ## Implementation plan"
+            ))
+
+    if fm.get("status") == "in-progress" and section is None:
+        issues.append(LintIssue(
+            p, "warning",
+            "status is in-progress but ticket has no ## Implementation plan section"
+        ))
 
     return issues
 

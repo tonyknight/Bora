@@ -46,4 +46,4 @@ def test_requirements_template_has_required_headings():
         "### Key flows",
     ]:
         assert heading in text
-    assert "{task name}" in text or "task name" in text.lower()
+    assert "{ticket-id} {task-id}:" in text

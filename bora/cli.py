@@ -36,6 +36,16 @@ from .paths import (
     status_file,
 )
 from .profile import read_profile, require_profile, write_profile
+from .upgrade import agents_template_is_stale, apply_upgrade, inspect_upgrade
+from .plan import (
+    VALID_PLAN_STATUSES,
+    extract_plan_section,
+    next_open_task_id,
+    parse_plan_tasks,
+    set_current_task_line,
+    set_plan_status_line,
+    set_task_checkbox,
+)
 from .writer_chapter import create_chapter
 from .writer_init import init_writer_project
 from .writer_skill import install_obsidian, uninstall_obsidian
@@ -75,8 +85,18 @@ def _regenerate_status(root: Path, project_path: Optional[str] = None, *, quiet:
         click.echo(f"Status.md updated → {rel}", err=True)
 
 
+def _warn_stale_agents(root: Path) -> None:
+    if agents_template_is_stale(root):
+        click.echo(
+            f"Note: AGENTS.md is not in sync with bora {__version__}. "
+            "Run `bora dev upgrade`.",
+            err=True,
+        )
+
+
 def _dev_project(project_path: str) -> tuple[Path, str]:
     root = require_repo_root()
+    _warn_stale_agents(root)
     try:
         segments = parse_project_path(project_path)
     except ProjectPathError as exc:
@@ -585,6 +605,175 @@ def dev_lint(project_path: str) -> None:
 
 
 # =============================================================================
+# dev plan
+# =============================================================================
+
+
+@dev.group()
+def plan() -> None:
+    """Show or update a ticket's ## Implementation plan section."""
+
+
+def _load_ticket_or_exit(root: Path, project_path: str, ticket_id: str):
+    t = find_ticket(project_tickets_dir(root, project_path), ticket_id)
+    if t is None:
+        click.echo(f"No ticket matched: {ticket_id}", err=True)
+        sys.exit(1)
+    return t
+
+
+@plan.command("show")
+@click.argument("project_path")
+@click.argument("ticket_id")
+def plan_show(project_path: str, ticket_id: str) -> None:
+    """Print a ticket's ## Implementation plan section."""
+    root, project_path = _dev_project(project_path)
+    t = _load_ticket_or_exit(root, project_path, ticket_id)
+    section = extract_plan_section(t.body)
+    if section is None:
+        click.echo(
+            f"Error: {t.id} has no ## Implementation plan section. "
+            "Add one to the ticket (see the ticket template).",
+            err=True,
+        )
+        sys.exit(1)
+    click.echo(section, nl=False)
+    if not section.endswith("\n"):
+        click.echo()
+
+
+@plan.command("set")
+@click.argument("project_path")
+@click.argument("ticket_id")
+@click.argument("field")
+@click.argument("value")
+def plan_set(project_path: str, ticket_id: str, field: str, value: str) -> None:
+    """Set plan_status (field=status) or current_task on a ticket."""
+    root, project_path = _dev_project(project_path)
+    t = _load_ticket_or_exit(root, project_path, ticket_id)
+    if field not in {"status", "current_task"}:
+        click.echo(
+            f"Error: cannot set field {field!r}. Settable fields: current_task, status",
+            err=True,
+        )
+        sys.exit(1)
+    if field == "status":
+        if value not in VALID_PLAN_STATUSES:
+            click.echo(
+                f"Error: invalid plan status {value!r}. "
+                f"Expected one of {sorted(VALID_PLAN_STATUSES)}",
+                err=True,
+            )
+            sys.exit(1)
+        t.set_field("plan_status", value)
+        t.body = set_plan_status_line(t.body, value)
+        if value == "in-progress" and t.status == "todo":
+            t.set_field("status", "in-progress")
+        elif value == "blocked":
+            t.set_field("status", "blocked")
+        click.echo(f"Updated {t.id}: plan_status = {value}")
+    else:
+        t.set_field("current_task", value)
+        t.body = set_current_task_line(t.body, value)
+        click.echo(f"Updated {t.id}: current_task = {value}")
+    t.save()
+    _regenerate_status(root, project_path)
+
+
+@plan.command("task")
+@click.argument("project_path")
+@click.argument("ticket_id")
+@click.argument("task_id")
+@click.argument("status")
+def plan_task(project_path: str, ticket_id: str, task_id: str, status: str) -> None:
+    """Mark a plan task todo or done."""
+    root, project_path = _dev_project(project_path)
+    t = _load_ticket_or_exit(root, project_path, ticket_id)
+    if status not in {"todo", "done"}:
+        click.echo("Error: task status must be todo or done", err=True)
+        sys.exit(1)
+    try:
+        t.body = set_task_checkbox(t.body, task_id, done=(status == "done"))
+    except ValueError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    section = extract_plan_section(t.body)
+    nxt = next_open_task_id(section or "")
+    t.set_field("current_task", nxt or None)
+    if section and parse_plan_tasks(section):
+        if nxt:
+            t.set_field("plan_status", "in-progress")
+            t.body = set_plan_status_line(t.body, "in-progress")
+            if t.status == "todo":
+                t.set_field("status", "in-progress")
+        else:
+            t.set_field("plan_status", "done")
+            t.body = set_plan_status_line(t.body, "done")
+    t.save()
+    click.echo(f"Updated {t.id}: {task_id} = {status}")
+    _regenerate_status(root, project_path)
+
+
+# =============================================================================
+# dev upgrade
+# =============================================================================
+
+
+@dev.command("upgrade")
+@click.option("--dry-run", is_flag=True, help="Show what would change without writing.")
+@click.option("--agents-only", is_flag=True, help="Only refresh AGENTS.md.")
+@click.option("--skills-only", is_flag=True, help="Only refresh already-installed skills.")
+@click.option("--force", is_flag=True, help="Overwrite a dirty unmarked AGENTS.md.")
+def dev_upgrade(dry_run: bool, agents_only: bool, skills_only: bool, force: bool) -> None:
+    """Refresh AGENTS.md and the skill pack to match this CLI version."""
+    root = find_repo_root()
+    if root is None:
+        click.echo(
+            "Error: not inside a bora project. Run `bora dev init` first.",
+            err=True,
+        )
+        sys.exit(1)
+    profile = read_profile(root)
+    agents = root / AGENTS_FILE
+    if not agents.exists() and (profile or {}).get("profile") != "dev":
+        click.echo(
+            "Error: no AGENTS.md and no dev profile. Run `bora dev init <project_path>` first.",
+            err=True,
+        )
+        sys.exit(1)
+    if dry_run:
+        plan = inspect_upgrade(root)
+        click.echo(f"AGENTS.md: {plan.agents_action} (version={plan.agents_version!r})")
+        if plan.dirty_unmarked:
+            click.echo("AGENTS.md has uncommitted changes (would refuse without --force).")
+        if plan.skill_paths:
+            click.echo("Skills that would be rewritten:")
+            for p in plan.skill_paths:
+                click.echo(f"  {p}")
+        else:
+            click.echo("No installed skills found. Hint: bora dev skill install <tool>")
+        return
+    try:
+        apply_upgrade(
+            root,
+            dry_run=False,
+            agents_only=agents_only,
+            skills_only=skills_only,
+            force=force,
+        )
+    except PermissionError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    click.echo(f"Updated AGENTS.md to bora {__version__}.")
+    click.echo("Review `git diff AGENTS.md` and keep local rules under Project-specific instructions.")
+    plan = inspect_upgrade(root)
+    if not plan.skill_paths and not skills_only:
+        click.echo("Hint: no skills installed. Run `bora dev skill install <tool>` (or all).")
+    elif not agents_only:
+        click.echo("Refreshed installed skill pack.")
+
+
+# =============================================================================
 # dev decision
 # =============================================================================
 
@@ -607,7 +796,7 @@ def dev_decision(args: tuple[str, ...]) -> None:
 
 @dev.group()
 def skill() -> None:
-    """Install or remove the bora skill for AI coding tools."""
+    """Install or remove the bora skill pack for AI coding tools."""
 
 
 @skill.command("install")
@@ -615,7 +804,7 @@ def skill() -> None:
 @click.option("--project", is_flag=True, help="Install into the current repo instead of user level.")
 @click.option("--force", is_flag=True, help="Overwrite an existing SKILL.md even if it isn't ours.")
 def skill_install(tool: str, project: bool, force: bool) -> None:
-    """Install the bora skill for an AI tool (claude, opencode, all)."""
+    """Install the bora skill pack for an AI tool (claude, opencode, all)."""
     root = _project_root_or_none(project)
     had_error = False
     for t in _resolve_tools(tool):

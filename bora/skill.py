@@ -17,7 +17,11 @@ from typing import Optional
 
 # A marker we look for in an existing SKILL.md before agreeing to remove it.
 # Conservative: we only manage skills we wrote ourselves.
-_SKILL_NAME_RE = re.compile(r"^name:\s*bora\s*$", re.MULTILINE)
+PACK_SKILLS = ("bora", "bora-plan", "bora-tdd", "bora-execute")
+_OWNED_NAME_RE = re.compile(
+    r"^name:\s*(bora|bora-plan|bora-tdd|bora-execute)\s*$",
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
@@ -55,20 +59,25 @@ TOOLS: dict[str, Tool] = {
 SKILL_NAME = "bora"
 
 
-def skill_path(tool: Tool, *, project_root: Optional[Path] = None) -> Path:
-    """Return the full path to a tool's bora skill directory."""
+def pack_root(tool: Tool, *, project_root: Optional[Path] = None) -> Path:
+    """Directory that holds the skill pack (`bora/`, `bora-plan/`, …)."""
     if project_root is not None:
-        return (project_root / tool.project_dir / SKILL_NAME).resolve()
-    return tool.global_dir / SKILL_NAME
+        return (project_root / tool.project_dir).resolve()
+    return tool.global_dir
+
+
+def skill_path(tool: Tool, *, project_root: Optional[Path] = None) -> Path:
+    """Return the full path to a tool's bootstrap `bora` skill directory."""
+    return pack_root(tool, project_root=project_root) / "bora"
 
 
 def is_bora_skill(skill_md: Path) -> bool:
-    """True if a SKILL.md file declares name: bora in its frontmatter."""
+    """True if a SKILL.md file declares a bora-owned name in its frontmatter."""
     try:
         text = skill_md.read_text(encoding="utf-8")
     except OSError:
         return False
-    return bool(_SKILL_NAME_RE.search(text))
+    return bool(_OWNED_NAME_RE.search(text))
 
 
 @dataclass
@@ -79,21 +88,24 @@ class InstallResult:
 
 
 def install(tool: Tool, *, project_root: Optional[Path] = None, force: bool = False) -> InstallResult:
-    """Install the bora skill for `tool`. Raises FileExistsError if a non-bora
-    SKILL.md is already at the target and `force` is False."""
-    target_dir = skill_path(tool, project_root=project_root)
-    skill_md = target_dir / "SKILL.md"
+    """Install the bora skill pack for `tool`. Raises FileExistsError if a
+    non-bora SKILL.md is already at a pack path and `force` is False."""
+    root = pack_root(tool, project_root=project_root)
+    bora_md = root / "bora" / "SKILL.md"
+    overwritten = bora_md.exists()
+    for name in PACK_SKILLS:
+        skill_md = root / name / "SKILL.md"
+        if skill_md.exists() and not force and not is_bora_skill(skill_md):
+            raise FileExistsError(
+                f"A different SKILL.md already exists at {skill_md}. "
+                f"Use --force to overwrite."
+            )
 
-    overwritten = skill_md.exists()
-    if overwritten and not force and not is_bora_skill(skill_md):
-        raise FileExistsError(
-            f"A different SKILL.md already exists at {skill_md}. "
-            f"Use --force to overwrite."
-        )
-
-    target_dir.mkdir(parents=True, exist_ok=True)
-    skill_md.write_text(BORA_SKILL_MD, encoding="utf-8")
-    return InstallResult(tool=tool, path=skill_md, overwritten=overwritten)
+    for name in PACK_SKILLS:
+        target_dir = root / name
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "SKILL.md").write_text(SKILL_TEMPLATES[name], encoding="utf-8")
+    return InstallResult(tool=tool, path=bora_md, overwritten=overwritten)
 
 
 @dataclass
@@ -105,27 +117,30 @@ class UninstallResult:
 
 
 def uninstall(tool: Tool, *, project_root: Optional[Path] = None, force: bool = False) -> UninstallResult:
-    """Remove the bora skill directory for `tool` if we own it.
+    """Remove the bora skill pack for `tool` if we own it."""
+    root = pack_root(tool, project_root=project_root)
+    bora_dir = root / "bora"
+    bora_md = bora_dir / "SKILL.md"
 
-    Refuses to delete a SKILL.md that doesn't declare `name: bora` unless
-    `force` is True.
-    """
-    target_dir = skill_path(tool, project_root=project_root)
-    skill_md = target_dir / "SKILL.md"
+    any_present = any((root / name).exists() for name in PACK_SKILLS)
+    if not any_present:
+        return UninstallResult(tool=tool, path=bora_dir, removed=False, reason="not installed")
 
-    if not target_dir.exists():
-        return UninstallResult(tool=tool, path=target_dir, removed=False, reason="not installed")
+    for name in PACK_SKILLS:
+        skill_md = root / name / "SKILL.md"
+        if skill_md.exists() and not is_bora_skill(skill_md) and not force:
+            return UninstallResult(
+                tool=tool,
+                path=root / name,
+                removed=False,
+                reason="SKILL.md at this path is not bora's (use --force to remove anyway)",
+            )
 
-    if skill_md.exists() and not is_bora_skill(skill_md) and not force:
-        return UninstallResult(
-            tool=tool,
-            path=target_dir,
-            removed=False,
-            reason="SKILL.md at this path is not bora's (use --force to remove anyway)",
-        )
-
-    shutil.rmtree(target_dir)
-    return UninstallResult(tool=tool, path=target_dir, removed=True)
+    for name in PACK_SKILLS:
+        target = root / name
+        if target.exists():
+            shutil.rmtree(target)
+    return UninstallResult(tool=tool, path=bora_dir, removed=True)
 
 
 @dataclass
@@ -170,7 +185,7 @@ def list_status(*, project_root: Optional[Path] = None) -> list[Status]:
 
 BORA_SKILL_MD = """---
 name: bora
-description: Use this skill when working in a project that contains an `AGENTS.md` referring to bora, a hierarchical `docs/ai/<Codebase>/<Target>/<Project>/` tree with a dated briefing, dated Requirements file, and `Status.md`, or `docs/ai/<path>/tickets/`. bora is a CLI for managing tickets and briefings for human-AI coding collaboration. Use this skill to read the project briefing, discuss architecture then write Requirements, create or update tickets, regenerate Status.md, and validate frontmatter.
+description: Use when the repo has an AGENTS.md referring to bora, a docs/ai hierarchical project, or when the user points at a project briefing. Use at the start of a session in a bora project before reading or editing those files.
 ---
 
 # bora
@@ -258,7 +273,15 @@ docs/
 - **Commit criteria before done or commit.** Do not mark a ticket or
   subtask `done` and do not git commit until completion tests pass, the
   change meets the matching requirement, and build tests pass. Commit
-  message: `{task name}: {summary of what was done}`.
+  message: `{ticket-id} {task-id}: {title}`.
+- **Plan on the ticket.** `## Implementation plan` on the ticket (`bora-plan`).
+  Never put the commit script in Requirements or a `plans/` folder.
+- **After "go", load `bora-execute`.** Walk remaining tickets. Show
+  completed vs remaining after each. Never ask "should I continue?"
+- **Skill check.** Before architecture, Requirements, tickets, a plan,
+  execute, or code, load `bora-plan`, `bora-tdd`, or `bora-execute`
+  when they match. The human runs `init`, `skill install`, and
+  `upgrade`; you run ticket/plan/status/lint.
 
 ## Command surface
 
@@ -273,7 +296,9 @@ docs/
 | `bora dev ticket subtask <project_path> <id> <sub-id> <status>` | Update a frontmatter subtask's status. |
 | `bora dev ticket note <project_path> <id> "<text>"` | Append a dated entry to the body Notes section. |
 | `bora dev status <project_path>` | Regenerate `Status.md`. |
-| `bora dev lint <project_path>` | Validate frontmatter and cross-references. |
+| `bora dev lint <project_path>` | Validate ticket frontmatter and plan sections. |
+| `bora dev upgrade` | Refresh managed AGENTS.md and installed skills. |
+| `bora dev plan show/set/task <project_path> …` | Read or update a ticket's implementation plan. |
 
 Run `bora dev <command> --help` for full options on any command.
 Missing `<project_path>` is an error; there is no active-project fallback.
@@ -311,7 +336,7 @@ Missing `<project_path>` is an error; there is no active-project fallback.
    checked.
 3. Then set status done. The `closed` date populates automatically.
 4. If the human wants a commit, use message
-   `{task name}: {summary of what was done}`. Do not commit if build or
+   `{ticket-id} {task-id}: {title}`. Do not commit if build or
    completion tests failed.
 
 ## Frontmatter reference
@@ -332,4 +357,73 @@ Ticket frontmatter fields:
 - `parent` — single ticket id, or empty.
 - `depends_on` — list of ticket ids that must be `done` first.
 - `subtasks` — list of `{id, title, status}` for major subtasks.
+- `plan_status` — optional. `draft` | `approved` | `in-progress` | `done` | `blocked`.
+- `current_task` — optional. A `Tnn` id from this ticket's implementation plan.
 """
+
+BORA_PLAN_SKILL_MD = """---
+name: bora-plan
+description: Use when a ticket in a bora project needs an implementation plan before code (Requirements already approved); when the user asks to plan a ticket; or when bora-execute has selected a ticket that has no ## Implementation plan yet.
+---
+
+# bora-plan
+
+Write `## Implementation plan` **on that ticket**. Do not create a
+`plans/` file. Do not append the commit script to Requirements.
+
+Each task is one commit (`T01`, `T02`, …), with exact files and a
+**Verify:** command copied from Requirements Testing requirements.
+No placeholders. During `bora-execute`, do not stop for per-ticket
+plan approval. If the human is planning a single ticket before "go",
+wait for their yes.
+
+Commands: `bora dev plan show|set|task <project_path> <id> …`.
+"""
+
+BORA_TDD_SKILL_MD = """---
+name: bora-tdd
+description: Use when implementing a feature, bugfix, or plan task in a bora project; before writing production code; or before marking a plan task or ticket done.
+---
+
+# bora-tdd
+
+No production code without a failing test first. Cycle: RED (write
+test, confirm the failure is the right one) → GREEN (minimal code,
+run the **task's** Verify command) → commit `{ticket-id} {task-id}:
+{title}` → next task.
+
+Do not invent `npm test` if the plan names `pytest` or `xcodebuild`.
+Do not mark a task complete on a pass you did not just run. After
+the ticket is complete, return to `bora-execute` (do not ask what
+next). Exceptions (ask the human): spike tickets, generated code,
+pure config/docs.
+"""
+
+BORA_EXECUTE_SKILL_MD = """---
+name: bora-execute
+description: Use when a bora project's Requirements are approved and the user asks to implement, execute, go, or work through the tickets; when resuming a project that still has todo or in-progress tickets; or after a ticket is marked done and other tickets remain.
+---
+
+# bora-execute
+
+Walk the **whole ticket board**. Create missing tickets from the
+Requirements Tasks Breakdown. Order: skip done; skip blocked; honor
+`depends_on`; then priority; then oldest id. One ticket in-progress
+at a time. For each ticket: `bora-plan` if needed, then `bora-tdd`.
+
+After each ticket `done`, run `bora dev status` and **show**
+completed vs remaining, then start the next ticket. Never ask
+"should I continue?"
+
+Stop when the board is complete, nothing unblocked remains,
+verification failed twice on the same task, the plan collides with
+Requirements, or the human interrupted. Resume from Status.md,
+`current_task`, and `git log --grep=<ticket-id>`.
+"""
+
+SKILL_TEMPLATES = {
+    "bora": BORA_SKILL_MD,
+    "bora-plan": BORA_PLAN_SKILL_MD,
+    "bora-tdd": BORA_TDD_SKILL_MD,
+    "bora-execute": BORA_EXECUTE_SKILL_MD,
+}

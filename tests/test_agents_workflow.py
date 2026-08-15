@@ -8,8 +8,8 @@ from bora.skill import BORA_SKILL_MD
 from bora.templates import AGENTS_MD, ticket_template
 
 
-def test_version_is_045():
-    assert __version__ == "0.4.5"
+def test_version_is_050():
+    assert __version__ == "0.5.0"
 
 
 def test_agents_md_has_scope_guardrail_and_status():
@@ -17,7 +17,7 @@ def test_agents_md_has_scope_guardrail_and_status():
     assert "Status.md" in AGENTS_MD
     assert "Requirements.md" in AGENTS_MD
     assert "discuss architecture" in AGENTS_MD.lower()
-    assert "{task name}" in AGENTS_MD or "task name" in AGENTS_MD.lower()
+    assert "{ticket-id} {task-id}:" in AGENTS_MD or "ticket-id" in AGENTS_MD
     assert "bora dev ticket new" in AGENTS_MD
     assert "bora decision new" not in AGENTS_MD
     assert "Tasks.md" not in AGENTS_MD or "not" in AGENTS_MD  # prefer zero Tasks.md mentions

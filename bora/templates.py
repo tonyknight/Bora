@@ -15,9 +15,14 @@ import yaml
 from .paths import tag_key
 
 
-AGENTS_MD = """# Agent Instructions
+AGENTS_TEMPLATE_VERSION = "0.5.0"
+MANAGED_END = "<!-- bora-managed:end -->"
+MANAGED_START_RE = re.compile(
+    r'<!--\s*bora-managed:start\s+version="([^"]+)"\s*-->'
+)
+MANAGED_END_RE = re.compile(r"<!--\s*bora-managed:end\s*-->")
 
-## Philosophy
+AGENTS_MD_BODY = """## Philosophy
 
 This project uses a structured collaboration framework. Documentation in
 `docs/ai/<Codebase>/<Target>/<Project>/` is your per-project shared
@@ -40,8 +45,20 @@ Three principles:
    Discuss architecture with the human before writing Requirements.
    Propose changes in conversation; don't edit silently.
 3. **Tickets are where work happens.** Create them from the Requirements
-   Tasks Breakdown only after architecture is agreed. Update their
-   status, notes, and subtasks as you progress.
+   Tasks Breakdown only after architecture is agreed. The implementation
+   plan lives **on the ticket** (`## Implementation plan`), never in
+   Requirements and never in a `plans/` folder.
+
+Before proposing architecture, writing Requirements, creating tickets,
+writing a plan, executing the board, or writing code, load `bora-plan`,
+`bora-tdd`, or `bora-execute` when they match. After a project-level
+"go", load `bora-execute` and walk remaining tickets. Never ask
+"should I continue?" between tickets. Show completed vs remaining after
+each ticket.
+
+The human runs `bora dev` for setup (`init`, `skill install`, `upgrade`)
+and conversational approval. You run ticket, plan, status, and lint
+commands. Do not ask the human to type those.
 
 ## Briefing sequence
 
@@ -57,9 +74,16 @@ When you join a session with no prior context, read in this order:
    `docs/ai/<path>/(YYYY-MM-DD) {ProjectName} Requirements.md`
 5. `docs/ai/<path>/Status.md`  (read only — never hand-edit)
 6. When implementing: create tickets from the Requirements
-   Tasks Breakdown. Tickets may be worked by one or more agents.
+   Tasks Breakdown. After the human says go, load `bora-execute` and
+   work through the board. Write `## Implementation plan` on each
+   ticket (`bora-plan`) before code. Use `bora-tdd` per plan task.
 7. `docs/ai/<path>/tickets/<id>.md` as the active work demands
 8. If budget-constrained, run `bora dev context <path> --budget N`
+
+Hard gates: no tickets until Requirements are approved; no production
+code until the current ticket has an implementation plan; no `done`
+without Commit criteria. Commit message:
+`{ticket-id} {task-id}: {title}`.
 
 ## Scope guardrail
 
@@ -121,7 +145,19 @@ docs/
    subtask's completion tests pass, the change meets the requirement,
    and build/tests pass (including platform builds such as macOS/iOS
    when that is the target). Commit message format:
-   `{task name}: {summary of what was done}`.
+   `{ticket-id} {task-id}: {title}`.
+
+### After Requirements are approved ("go")
+
+1. Create tickets from the Tasks Breakdown if they do not exist.
+2. Load `bora-execute`. Do not stop after the first ticket.
+3. For each unblocked ticket: write `## Implementation plan` if missing,
+   then `bora-tdd` (failing test → implement → verify → commit one
+   plan task). Check tasks off with `bora dev plan task`.
+4. After each ticket `done`, show completed vs remaining (`bora dev
+   status`) and start the next ticket. Never ask whether to continue.
+5. Stop only when the board is complete, blocked with no other
+   runnable work, verification failed twice, or the human interrupted.
 
 ### Resuming work on an existing ticket
 
@@ -148,7 +184,7 @@ docs/
 3. Then set status: `bora dev ticket set <project_path> <id> status done`.
    The `closed` date populates automatically.
 4. If the human wants a commit, use message
-   `{task name}: {summary of what was done}`. Do not commit if build or
+   `{ticket-id} {task-id}: {title}`. Do not commit if build or
    completion tests failed.
 
 ### Recording an architectural decision
@@ -182,7 +218,37 @@ Ticket frontmatter fields:
 - `parent` — single ticket id, or empty.
 - `depends_on` — list of ticket ids that must be `done` first.
 - `subtasks` — list of `{id, title, status}` for major subtasks.
+- `plan_status` — optional. `draft` | `approved` | `in-progress` | `done` | `blocked`.
+- `current_task` — optional. A `Tnn` id from this ticket's implementation plan.
 """
+
+
+def render_agents_md() -> str:
+    start_tag = f'<!-- bora-managed:start version="{AGENTS_TEMPLATE_VERSION}" -->'
+    return (
+        "# Agent Instructions\n\n"
+        f"{start_tag}\n"
+        f"{AGENTS_MD_BODY.strip()}\n"
+        f"{MANAGED_END}\n\n"
+        "## Project-specific instructions\n\n"
+        "Add local rules below this heading. `bora dev upgrade` never overwrites\n"
+        "this section.\n"
+    )
+
+
+def replace_managed_region(text: str, *, version: str = AGENTS_TEMPLATE_VERSION) -> str:
+    """Replace the managed block; preserve everything after the end marker."""
+    start_m = MANAGED_START_RE.search(text)
+    end_m = MANAGED_END_RE.search(text)
+    if not start_m or not end_m or end_m.start() < start_m.end():
+        return render_agents_md()
+    start_tag = f'<!-- bora-managed:start version="{version}" -->'
+    new_block = f"{start_tag}\n{AGENTS_MD_BODY.strip()}\n{MANAGED_END}"
+    return text[: start_m.start()] + new_block + text[end_m.end() :]
+
+
+AGENTS_MD = render_agents_md()
+
 
 
 PROJECT_MD_TEMPLATE = """---
@@ -338,18 +404,25 @@ Functional and non-functional requirements.
 
 ## Testing requirements
 
+Name the project verify command(s) here (for example `xcodebuild` for an
+iOS/macOS target; otherwise that project's equivalent). Ticket plan
+**Verify:** lines copy from this section — do not invent a generic
+`npm test` on a native Apple project.
+
 ## Commit criteria
 
 Before marking a ticket or subtask done, and before any git commit:
 
-- [ ] Subtask completion tests defined for this work have passed
+- [ ] Plan-task verification command passed (RED then GREEN)
 - [ ] The change meets the matching requirement and acceptance criteria
 - [ ] Build tests passed (for example `xcodebuild` on macOS/iOS; otherwise the project's equivalent tests)
-- Commit message format: `{{task name}}: {{summary of what was done}}`
+- Commit message format: `{{ticket-id}} {{task-id}}: {{title}}`
 
 ## Tasks Breakdown
 
 Work items that become tickets. Do not create tickets until this section is agreed.
+Each item becomes a ticket. The implementation plan is written on the ticket
+when execute reaches it — not in this file.
 
 ## Risks and assumptions
 
@@ -585,6 +658,11 @@ to know.
 
 Detailed checklist. Major subtasks should also appear in the frontmatter
 `subtasks` field so they show up in `Status.md`.
+
+## Implementation plan
+
+Status: draft
+Current task:
 
 ## Notes
 

@@ -53,8 +53,17 @@ def _format_progress(ticket: Ticket) -> str:
 def _format_ticket_line(ticket: Ticket, *, include_notes: bool = False, include_progress: bool = False) -> str:
     """Render a single ticket entry as a Markdown bullet."""
     line = f"- **{ticket.id}** {ticket.title} [{ticket.priority}]"
+    extras = []
     if include_notes and ticket.notes:
-        line += f" — {ticket.notes}"
+        extras.append(ticket.notes)
+    plan_status = ticket.frontmatter.get("plan_status") or ""
+    if include_progress and plan_status:
+        from .plan import extract_plan_section, plan_progress_label
+
+        current = str(ticket.frontmatter.get("current_task") or "")
+        extras.append(plan_progress_label(str(plan_status), current, extract_plan_section(ticket.body)))
+    if extras:
+        line += " — " + " · ".join(extras)
     if include_progress:
         progress = _format_progress(ticket)
         if progress:
@@ -141,7 +150,7 @@ def generate_status_md(root: Path, project_path: str) -> str:
     out.append("")
     if blocked or implicit_blocked:
         for t in blocked:
-            line = _format_ticket_line(t, include_notes=True)
+            line = _format_ticket_line(t, include_notes=True, include_progress=True)
             if t.id in blocked_map:
                 line += f"\n  - depends on: {', '.join(blocked_map[t.id])}"
             out.append(line)
