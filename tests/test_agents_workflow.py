@@ -4,19 +4,19 @@ from click.testing import CliRunner
 
 from bora import __version__
 from bora.cli import main
-from bora.skill import BORA_SKILL_MD
+from bora.skill_pack import BORA_SKILL_MD
 from bora.templates import AGENTS_MD, ticket_template
 
 
 def test_version_is_050():
-    assert __version__ == "0.5.0"
+    assert __version__ == "0.5.5"
 
 
 def test_agents_md_has_scope_guardrail_and_status():
     assert "Scope guardrail" in AGENTS_MD
     assert "Status.md" in AGENTS_MD
     assert "Requirements.md" in AGENTS_MD
-    assert "discuss architecture" in AGENTS_MD.lower()
+    assert "bora-design" in AGENTS_MD
     assert "{ticket-id} {task-id}:" in AGENTS_MD or "ticket-id" in AGENTS_MD
     assert "bora dev ticket new" in AGENTS_MD
     assert "bora decision new" not in AGENTS_MD

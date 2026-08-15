@@ -22,7 +22,7 @@ def test_write_init_creates_profile(runner):
         assert result.exit_code == 0, result.output
         prof = json.loads(Path(".bora/profile.json").read_text())
         assert prof["profile"] == "write"
-        assert prof["version"] == "0.5.0"
+        assert prof["version"] == "0.5.5"
 
 
 def test_write_init_creates_agents_md(runner):

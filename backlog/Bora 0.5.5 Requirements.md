@@ -29,7 +29,7 @@ The product bet does not change:
 
 1. **Same files, more gates.** Do not add spec/plan/review directories. Design output is Requirements. Review output is a section on the ticket (and Notes). Finish writes nothing new except git operations the human chose.
 2. **New human gate only at the end.** 0.5.0 already has Requirements approval + go. 0.5.5 adds a **finish menu** (merge / PR / keep) when the board is complete. Do not reintroduce per-ticket “continue?” prompts.
-3. **Worktrees are consent-first, then sticky.** Isolation protects `main` in a multi-target iOS/macOS repo. Ask once per project unless the human already declared a preference; remember it in `.bora/` or the project briefing so later tickets in the same execute run do not re-ask.
+3. **Worktrees are consent-first, then sticky.** Isolation protects the branch the engineer was on when execute started (often `main`, but not assumed). Ask once per project unless the human already declared a preference; remember it in the project briefing so later tickets in the same execute run do not re-ask. **Finish merges back to that starting branch only** — never silently target `main` if work began elsewhere.
 4. **Review the ticket, not every `T0n`.** Superpowers reviews every plan task. Bora’s grain is the ticket (the board unit, the grepable commit series). One review after the ticket’s last commit, before `status done`. Critical/important findings block moving to the next ticket.
 5. **Debug before the second rewrite.** 0.5.0 stops after two verify failures. 0.5.5 loads `bora-debug` on the first unexpected failure so the agent finds root cause instead of flailing, then either continues the task or blocks the ticket.
 6. **Subagents are optional.** Default execute stays in-session (0.5.0). If the harness can dispatch subagents, `bora-execute` *may* run one implementer per ticket. Never parallelize two tickets that touch the same files; `depends_on` still serializes.
@@ -108,7 +108,7 @@ New conversational beats:
 
 - During design: approve Requirements **in sections** if the agent presents them that way (architecture, then testing/commit criteria, then Tasks Breakdown). One final “approved” still suffices for small projects.
 - After “go”: maybe one yes/no on a worktree. Then silence except board updates.
-- When the board is done: pick **1 merge / 2 PR / 3 keep branch**.
+- When the board is done: pick **1 merge / 2 PR / 3 keep branch**. If they merge locally, a second yes/no on **worktree cleanup** (restore repo to how it was before isolation).
 
 They still do not type `plan`, `ticket`, `lint`, or `status`.
 
@@ -154,12 +154,13 @@ Install shape (full pack; 0.5.0 four plus six):
 **Body:**
 
 - Follow Superpowers’ detect-existing-isolation → native harness tool → `git worktree` fallback. Never fight the harness.
+- **Record origin branch** at execute start (before creating isolation): the checked-out branch name the human was on when they said “go” (or `detached` + short SHA if detached). Store on the project briefing frontmatter as `origin_branch:` (e.g. `feature/share-extension`). This is the **only** merge target for option 1 in `bora-finish` — do not assume `main`/`master`.
 - **Consent:** if no stored preference, ask once: isolate this project’s work? Yes → create; no → work in place for this project. Store the answer so later tickets in the same execute run do not re-ask.
-- **Branch name** (git-friendly, derived from project path): `bora/<project_path-as-slug>` e.g. `bora/photoapp-ios-share-extension`. If it exists, reuse it (resume).
+- **Branch name** (git-friendly, derived from project path): `bora/<project_path-as-slug>` e.g. `bora/photoapp-ios-share-extension`. If it exists, reuse it (resume). The execute branch is where ticket commits land; `origin_branch` is where they integrate back.
 - Worktree directory: prefer `.worktrees/` at repo root if gitignored; else harness default. Do not commit the worktree.
-- `docs/ai/<path>/` is the same files in the worktree (it is the same git). Tickets and Status updates happen there so `main` checkout is not dirty.
+- `docs/ai/<path>/` is the same files in the worktree (it is the same git). Tickets and Status updates happen there so the origin branch checkout is not dirty.
 - Do not start execute on `main`/`master` without explicit consent (Superpowers rule, kept).
-- Cleanup is **`bora-finish`**, not this skill.
+- Worktree removal is **`bora-finish`** (human-approved), not this skill.
 
 Thin CLI (optional, agent-facing): none required in 0.5.5 if git + skill suffice. Do not add `bora dev worktree` unless the skill cannot be followed reliably without it. Prefer skill-only first.
 
@@ -213,20 +214,31 @@ Replaces 0.5.0’s blunt “two failures then stop” as the first response. Aft
 **Body:**
 
 - Run `bora-verify` on the project suite first. Failures: no menu.
-- Confirm base branch with the human if ambiguous.
+- Read `origin_branch` from the project briefing (set by `bora-worktree` at execute start). That branch is the merge target for option 1. If missing or ambiguous, ask the human — **do not default to `main`**.
 - Present Superpowers’ menu, adapted:
 
 ```
 Board complete for <project_path>. What would you like to do?
 
-1. Merge back to <base-branch> locally
+1. Merge back to <origin_branch> locally
 2. Push and create a Pull Request
 3. Keep the branch as-is (I'll handle it later)
 ```
 
-- Detached HEAD / externally managed worktree: omit local merge (options 2 and 3 only).
+- **Option 1:** merge the execute branch (`bora/<slug>`) into `<origin_branch>` only — the branch where implementation started, not `main` unless that was the origin. Checkout `<origin_branch>`, merge, verify if Requirements name a post-merge command.
+- **After option 1, if a worktree was created this execute run:** offer cleanup (second consent):
+
+```
+Merge complete on <origin_branch>. Remove the bora worktree and execute branch to restore the repo?
+
+1. Yes — remove worktree + delete bora/<slug> (only what this session created)
+2. No — leave worktree/branch in place
+```
+
+  Cleanup means: remove the worktree directory, delete branch `bora/<slug>` if fully merged, return the primary checkout to `<origin_branch>` so the repo matches its pre-isolation layout. Never remove worktrees or branches the human created outside Bora.
+- Detached HEAD / externally managed worktree: omit local merge (options 2 and 3 only); cleanup offer applies only when Bora created the worktree.
 - Discard only if the human explicitly asks.
-- Execute the choice; then clean up a worktree this session created (provenance: only remove what `bora-worktree` created).
+- Options 2 and 3: do not auto-clean; offer cleanup only if the human asks.
 - Do not mark tickets `done` here — they should already be `done`. Update a ticket Note if merge/PR URL exists.
 - Bora still does not become a git porcelain CLI. The **agent** runs `git` / `gh`. No `bora dev finish` command unless we later find agents cannot follow the menu without one.
 
@@ -266,6 +278,7 @@ Skill-check list includes all 0.5.5 names. First-time: `bora-design` before Requ
 | Last `T0n` committed on a ticket | `bora-verify`, `bora-review` | Marking `done` and jumping to the next ticket |
 | Ticket `done`, others remain | `bora-execute` board display, next ticket | Finish menu; “continue?” |
 | All tickets `done` | `bora-verify` (project), `bora-finish` | Silent stop with a dirty branch and no menu |
+| Finish option 1 (local merge) | Merge to `origin_branch` only; offer worktree cleanup | Merging to `main` by assumption; auto-removing worktrees without consent |
 | Human pastes review comments | `bora-review` (receiving: fix Critical/Important) | Arguing without reading the diff |
 
 ---
@@ -289,9 +302,14 @@ Optional `## Review` section appended by `bora-review`. Lint ignores unknown `##
 - `plan_status` / `current_task` rules from 0.5.0 remain.
 - Still no `plans/` resolver.
 
-### 7.4 Stored worktree preference
+### 7.4 Stored worktree and origin-branch metadata
 
-Minimal, git-friendly: a key on the existing project briefing frontmatter, e.g. `worktree: true|false`, set after the first consent. Do not add a new config file if frontmatter suffices. Repo-global `.bora/profile.json` must **not** force all projects to isolate.
+Minimal, git-friendly keys on the project briefing frontmatter:
+
+- `worktree: true|false` — set after the first isolation consent.
+- `origin_branch: <name>` — set at execute start (`bora-worktree`); the branch the human was on when they said “go”. `bora-finish` option 1 merges here only.
+
+Do not add a new config file if frontmatter suffices. Repo-global `.bora/profile.json` must **not** force all projects to isolate or override `origin_branch`.
 
 ### 7.5 Status.md
 
@@ -305,7 +323,9 @@ No new buckets. After review findings that block a ticket, status is `blocked` o
 
 Review-fix commits on the same ticket continue the sequence (`T04` added if needed, or a new task `T03b` is **forbidden** — use `T04`). Finish merge/PR is human-chosen; commit messages for merge are git defaults / `gh pr` title, not a Bora format.
 
-Branch `bora/<slug>` is the execute workspace. Ticket files and Status.md commit as part of the same history as code (agent may commit docs with the task they belong to, or with T01 if the plan was written then). Prefer: plan-section updates ride along with the `T0n` commit they describe, so git stays aligned.
+Branch `bora/<slug>` is the execute workspace; `origin_branch` (briefing frontmatter) is the integration target. Local merge (finish option 1) lands on `origin_branch` only — never `main` by assumption. After merge, optional human-approved worktree cleanup removes Bora-created isolation and restores the primary checkout to `origin_branch`.
+
+Ticket files and Status.md commit as part of the same history as code (agent may commit docs with the task they belong to, or with T01 if the plan was written then). Prefer: plan-section updates ride along with the `T0n` commit they describe, so git stays aligned.
 
 ---
 
@@ -323,10 +343,10 @@ Branch `bora/<slug>` is the execute workspace. Ticket files and Status.md commit
 1. **Cursor install target** — registry + tests; `all` includes it.
 2. **Lint error** for in-progress without a plan section.
 3. **`bora-design` skill** + `AGENTS.md` briefing sequence points at it.
-4. **`bora-worktree` skill** + briefing `worktree:` preference.
+4. **`bora-worktree` skill** + briefing `worktree:` and `origin_branch:` metadata.
 5. **`bora-verify` + `bora-debug` skills**; `bora-tdd` / `bora-execute` cross-links.
 6. **`bora-review` skill** + ticket `## Review` convention.
-7. **`bora-finish` skill**; `bora-execute` handoff when the board is clear.
+7. **`bora-finish` skill** — merge to `origin_branch` only; optional post-merge worktree cleanup with consent; `bora-execute` handoff when the board is clear.
 8. **`bora-execute` rewrite** in the skill body (hooks above; optional subagent section).
 9. **Bootstrap `bora` skill** — skill-check all ten names; trigger-only description still accurate.
 10. **Upgrade template** — `bora dev upgrade` writes `version="0.5.5"` and the ten-skill pack; tests that a 0.5.0 marked `AGENTS.md` keeps Project-specific instructions.
@@ -339,7 +359,7 @@ Branch `bora/<slug>` is the execute workspace. Ticket files and Status.md commit
 
 0.5.5 is successful when:
 
-1. A first-time engineer still types only init + skill install + chat, and additionally gets a design conversation that fills Requirements **before** tickets, a finish menu when the board is done, and (if they consented) work not committed on `main`.
+1. A first-time engineer still types only init + skill install + chat, and additionally gets a design conversation that fills Requirements **before** tickets, a finish menu when the board is done, merge back to the branch they started on (not assumed `main`), and (if they consented) optional worktree cleanup that restores the repo.
 2. After each ticket, they still see completed vs remaining; they also see a review verdict before the next ticket starts.
 3. Unexpected test/build failure produces a root-cause Note, not an immediate rewrite.
 4. Claims of “tests pass” / “ticket done” / “board complete” are backed by a command run in that turn (`bora-verify`).
@@ -355,8 +375,9 @@ Branch `bora/<slug>` is the execute workspace. Ticket files and Status.md commit
 - 0.5.5 is process depth on the 0.5.0 file model, not a new tree.
 - Skills: design, worktree, review, debug, verify, finish; optional subagent-per-ticket.
 - Review grain = ticket, not `T0n`.
-- Worktrees = consent-first, preference stored on the briefing.
-- Finish menu = the new human gate; still no per-ticket continue prompt.
+- Worktrees = consent-first, preference stored on the briefing; `origin_branch` recorded at execute start.
+- Finish menu = the new human gate; merge targets `origin_branch` only; worktree cleanup is a second consent after local merge.
+- Still no per-ticket continue prompt.
 - Cursor install in this release.
 - In-progress without a plan → lint error.
 - No `bora dev finish` / `worktree` / `execute` CLI unless skills fail in practice.

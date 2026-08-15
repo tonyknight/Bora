@@ -135,8 +135,21 @@ def test_e2e_dev_workflow(runner):
         assert result.exit_code == 0, result.output
         assert "My first ticket" in result.output
 
-        # Set status
-        ticket_id = next((root / "docs" / "ai" / "Acme" / "App" / "tickets").glob("*.md")).stem
+        # Set status (in-progress requires at least one ### Tnn: in the plan — 0.5.5)
+        ticket_path = next((root / "docs" / "ai" / "Acme" / "App" / "tickets").glob("*.md"))
+        ticket_id = ticket_path.stem
+        text = ticket_path.read_text()
+        plan = """## Implementation plan
+
+Status: draft
+Current task:
+
+### T01: scaffold ticket
+- [ ] done
+
+"""
+        text = text.split("## Implementation plan")[0] + plan + "## Notes\n\n"
+        ticket_path.write_text(text, encoding="utf-8")
         result = runner.invoke(main, ["dev", "ticket", "set", A, ticket_id, "status", "in-progress"])
         assert result.exit_code == 0, result.output
 

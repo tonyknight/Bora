@@ -15,7 +15,7 @@ import yaml
 from .paths import tag_key
 
 
-AGENTS_TEMPLATE_VERSION = "0.5.0"
+AGENTS_TEMPLATE_VERSION = "0.5.5"
 MANAGED_END = "<!-- bora-managed:end -->"
 MANAGED_START_RE = re.compile(
     r'<!--\s*bora-managed:start\s+version="([^"]+)"\s*-->'
@@ -50,11 +50,12 @@ Three principles:
    Requirements and never in a `plans/` folder.
 
 Before proposing architecture, writing Requirements, creating tickets,
-writing a plan, executing the board, or writing code, load `bora-plan`,
-`bora-tdd`, or `bora-execute` when they match. After a project-level
-"go", load `bora-execute` and walk remaining tickets. Never ask
-"should I continue?" between tickets. Show completed vs remaining after
-each ticket.
+writing a plan, executing the board, or writing code, load the matching
+skill (`bora-design`, `bora-plan`, `bora-tdd`, `bora-execute`,
+`bora-worktree`, `bora-verify`, `bora-review`, `bora-debug`,
+`bora-finish`). After a project-level "go", load `bora-execute` and walk
+remaining tickets. Never ask "should I continue?" between tickets. Show
+completed vs remaining after each ticket.
 
 The human runs `bora dev` for setup (`init`, `skill install`, `upgrade`)
 and conversational approval. You run ticket, plan, status, and lint
@@ -67,16 +68,17 @@ When you join a session with no prior context, read in this order:
 1. AGENTS.md (root — this file)
 2. The human-referenced project briefing:
    `docs/ai/<path>/(YYYY-MM-DD) {ProjectName}.md`
-3. Discuss architecture with the human before writing Requirements.
-   Do not skip this conversation. Do not fill in the Requirements
-   file from Project.md alone.
+3. Load `bora-design`. Discuss architecture with the human before
+   writing Requirements. Do not skip this conversation. Do not fill in
+   the Requirements file from the briefing alone.
 4. After agreement, author/update:
    `docs/ai/<path>/(YYYY-MM-DD) {ProjectName} Requirements.md`
 5. `docs/ai/<path>/Status.md`  (read only — never hand-edit)
 6. When implementing: create tickets from the Requirements
-   Tasks Breakdown. After the human says go, load `bora-execute` and
-   work through the board. Write `## Implementation plan` on each
-   ticket (`bora-plan`) before code. Use `bora-tdd` per plan task.
+   Tasks Breakdown. After the human says go, load `bora-execute`
+   (worktree consent, plan, tdd, verify, review, finish). Write
+   `## Implementation plan` on each ticket (`bora-plan`) before code.
+   Use `bora-tdd` per plan task.
 7. `docs/ai/<path>/tickets/<id>.md` as the active work demands
 8. If budget-constrained, run `bora dev context <path> --budget N`
 
@@ -151,13 +153,27 @@ docs/
 
 1. Create tickets from the Tasks Breakdown if they do not exist.
 2. Load `bora-execute`. Do not stop after the first ticket.
-3. For each unblocked ticket: write `## Implementation plan` if missing,
-   then `bora-tdd` (failing test → implement → verify → commit one
-   plan task). Check tasks off with `bora dev plan task`.
-4. After each ticket `done`, show completed vs remaining (`bora dev
-   status`) and start the next ticket. Never ask whether to continue.
-5. Stop only when the board is complete, blocked with no other
-   runnable work, verification failed twice, or the human interrupted.
+3. On execute start: `bora-worktree` (consent once; record
+   `origin_branch` and `worktree` on the briefing frontmatter).
+4. For each unblocked ticket: `bora-plan` if needed, then `bora-tdd`
+   (with `bora-debug` on unexpected failure, `bora-verify` on each task).
+5. After last task: `bora-verify` (ticket) → `bora-review` → mark
+   `done` only if review is clean or minors-only.
+6. Show completed vs remaining (`bora dev status`) and start the next
+   ticket. Never ask whether to continue.
+7. Board complete: `bora-verify` (project suite) → `bora-finish`
+   (merge to `origin_branch`, PR, or keep; optional worktree cleanup).
+
+Stop when the board is complete, blocked with no other runnable work,
+debug exhausted on the same hypothesis, or the human interrupted.
+
+### Briefing frontmatter (execute metadata)
+
+Optional keys on the project briefing, set during execute:
+
+- `worktree: true|false` — isolation consent
+- `origin_branch: <name>` — branch when the human said "go"; merge target
+  for `bora-finish` option 1 (never assume `main`)
 
 ### Resuming work on an existing ticket
 
@@ -176,9 +192,8 @@ docs/
 ### Marking a ticket complete
 
 1. Before `bora dev ticket set <project_path> <id> status done` (or
-   setting a subtask to `done`), run the Commit criteria checks in the
-   Requirements file: completion tests pass, the change meets the
-   requirement, and build/tests pass.
+   setting a subtask to `done`), run **`bora-verify`** and satisfy
+   Commit criteria in the Requirements file.
 2. Verify all acceptance criteria are met and all body checkboxes are
    checked.
 3. Then set status: `bora dev ticket set <project_path> <id> status done`.

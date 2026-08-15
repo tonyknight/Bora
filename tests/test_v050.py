@@ -52,8 +52,8 @@ def _init_and_ticket(runner, title="Add login"):
 
 
 def test_version_is_050():
-    assert __version__ == "0.5.0"
-    assert AGENTS_TEMPLATE_VERSION == "0.5.0"
+    assert __version__ == "0.5.5"
+    assert AGENTS_TEMPLATE_VERSION == "0.5.5"
 
 
 def test_ticket_template_has_implementation_plan_section():
@@ -65,7 +65,7 @@ def test_ticket_template_has_implementation_plan_section():
 
 
 def test_agents_md_has_managed_markers_and_commit_contract():
-    assert "bora-managed:start version=\"0.5.0\"" in AGENTS_MD
+    assert "bora-managed:start version=\"0.5.5\"" in AGENTS_MD
     assert "bora-managed:end" in AGENTS_MD
     assert "## Project-specific instructions" in AGENTS_MD
     assert "{ticket-id} {task-id}:" in AGENTS_MD
@@ -86,7 +86,7 @@ def test_init_writes_managed_agents(runner):
     with runner.isolated_filesystem():
         runner.invoke(main, ["dev", "init", SAMPLE])
         text = Path("AGENTS.md").read_text()
-        assert "bora-managed:start version=\"0.5.0\"" in text
+        assert "bora-managed:start version=\"0.5.5\"" in text
         assert "## Project-specific instructions" in text
 
 
@@ -285,16 +285,15 @@ Current task: T02
         assert "T02/T03" in status or "1/3" in status
 
 
-def test_lint_warns_in_progress_without_plan(runner):
+def test_lint_errors_in_progress_without_plan(runner):
     with runner.isolated_filesystem():
         path = _init_and_ticket(runner)
         text = path.read_text()
-        # Remove the implementation plan section entirely
         path.write_text(text.split("## Implementation plan")[0] + "## Notes\n", encoding="utf-8")
         runner.invoke(main, ["dev", "ticket", "set", SAMPLE, "01", "status", "in-progress"])
         result = runner.invoke(main, ["dev", "lint", SAMPLE])
-        assert result.exit_code == 0  # warning, not error
-        assert "warning" in result.stderr.lower() or "warning" in result.output.lower()
+        assert result.exit_code == 1
+        assert "error" in (result.stderr + result.output).lower()
         assert "implementation plan" in (result.stderr + result.output).lower()
 
 
@@ -353,7 +352,7 @@ def test_lint_duplicate_task_ids():
 
 
 def test_skill_pack_has_four_trigger_only_descriptions():
-    assert set(PACK_SKILLS) == {"bora", "bora-plan", "bora-tdd", "bora-execute"}
+    assert len(PACK_SKILLS) == 10
     for name, text in SKILL_TEMPLATES.items():
         assert text.startswith("---\nname: " + name)
         desc_line = [ln for ln in text.splitlines() if ln.startswith("description:")][0]
@@ -384,11 +383,11 @@ def test_upgrade_rewrites_unmarked_agents(runner):
         result = runner.invoke(main, ["dev", "upgrade"])
         assert result.exit_code == 0, result.output
         text = Path("AGENTS.md").read_text()
-        assert "bora-managed:start version=\"0.5.0\"" in text
+        assert "bora-managed:start version=\"0.5.5\"" in text
         assert "bora-execute" in text
         assert "## Project-specific instructions" in text
         prof = json.loads(Path(".bora/profile.json").read_text())
-        assert prof["version"] == "0.5.0"
+        assert prof["version"] == "0.5.5"
 
 
 def test_upgrade_preserves_user_section(runner):
@@ -406,7 +405,7 @@ def test_upgrade_preserves_user_section(runner):
         result = runner.invoke(main, ["dev", "upgrade"])
         assert result.exit_code == 0, result.output
         out = Path("AGENTS.md").read_text()
-        assert 'version="0.5.0"' in out
+        assert 'version="0.5.5"' in out
         assert "Never delete the Share Extension App Group." in out
 
 
@@ -460,7 +459,7 @@ def test_upgrade_agents_only_does_not_rewrite_skills(runner):
         Path("AGENTS.md").write_text("# Old agents\n", encoding="utf-8")
         result = runner.invoke(main, ["dev", "upgrade", "--agents-only"])
         assert result.exit_code == 0, result.output
-        assert "bora-managed:start version=\"0.5.0\"" in Path("AGENTS.md").read_text()
+        assert "bora-managed:start version=\"0.5.5\"" in Path("AGENTS.md").read_text()
         assert skill.read_text() == "# mutated skill\n"
 
 
@@ -487,5 +486,5 @@ def test_upgrade_preserves_initialized_at(runner):
         result = runner.invoke(main, ["dev", "upgrade"])
         assert result.exit_code == 0, result.output
         out = json.loads(prof_path.read_text())
-        assert out["version"] == "0.5.0"
+        assert out["version"] == "0.5.5"
         assert out["initialized_at"] == "2026-01-01T00:00:00+00:00"

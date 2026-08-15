@@ -11,9 +11,9 @@ Whether you're a developer building software with an AI coding agent, or a write
 
 Bora fixes this by maintaining a small, structured set of Markdown files inside your project. Any model — any tool — can read them to get oriented in seconds. The files travel with your project, stay in version control, and are always the authoritative source of what's happening and why.
 
-Bora 0.5.0 ships two isolated **profiles**:
+Bora 0.5.5 ships two isolated **profiles**:
 
-- **`dev`** — for software projects: hierarchical tickets, a dated Requirements spec, implementation plans on each ticket, a four-skill pack (`bora`, `bora-plan`, `bora-tdd`, `bora-execute`), and per-project status dashboards.
+- **`dev`** — for software projects: hierarchical tickets, a dated Requirements spec, implementation plans on each ticket, a ten-skill pack (`bora`, `bora-plan`, `bora-tdd`, `bora-execute`, `bora-design`, `bora-worktree`, `bora-review`, `bora-debug`, `bora-verify`, `bora-finish`), and per-project status dashboards.
 - **`write`** — for writing projects: chapter scaffolding, research interaction logs, story context, and summary generation.
 
 ---
@@ -254,22 +254,26 @@ Plans live **on the ticket** (`## Implementation plan`), not in Requirements and
 
 | Command | What it does |
 |---------|-------------|
-| `bora dev skill install <tool>` | Install the bora **skill pack** (`bora`, `bora-plan`, `bora-tdd`, `bora-execute`) for an AI tool. Tools: `claude`, `opencode`, `all`. Default: user-level install (`~/.claude/`). Add `--project` to install inside the repo instead. |
+| `bora dev skill install <tool>` | Install the bora **skill pack** (ten skills) for an AI tool. Tools: `claude`, `opencode`, `cursor`, `all`. Default: user-level install. Add `--project` to install inside the repo instead. |
 | `bora dev skill uninstall <tool>` | Remove the bora skill pack. |
 | `bora dev skill list` | Show where the bora skill pack is installed for each known tool. |
 
 ### AI tool skills
 
-Claude Code, OpenCode, and other agentic tools support **skills** — directories containing a `SKILL.md` that the agent loads when its description matches the current task. Bora 0.5.0 ships a **pack** of four skills:
+Claude Code, OpenCode, Cursor, and other agentic tools support **skills** — directories containing a `SKILL.md` that the agent loads when its description matches the current task. Bora 0.5.5 ships a **pack** of ten skills:
 
 | Skill | When it loads |
 |-------|----------------|
 | `bora` | Session start in a bora project (briefing, tickets, `AGENTS.md`) |
+| `bora-design` | Architecture conversation before Requirements are approved |
 | `bora-plan` | A ticket needs `## Implementation plan` before code |
 | `bora-tdd` | Implementing a plan task (failing test → code → verify → commit) |
 | `bora-execute` | Requirements approved and you say **go** / implement / resume the board |
-
-Worktree, review, debug, and finish skills are planned for 0.5.5 — they are not in this release.
+| `bora-worktree` | Start of execute — optional git isolation; records `origin_branch` |
+| `bora-verify` | Before claiming task/ticket/board complete or finish |
+| `bora-review` | After a ticket's last commit, before marking `done` |
+| `bora-debug` | Unexpected verify/build failure (not expected RED) |
+| `bora-finish` | Board complete — merge to `origin_branch`, PR, or keep; optional worktree cleanup |
 
 Install the pack after `bora dev init <project_path>`:
 
@@ -459,6 +463,10 @@ The same flows work with local models. Smaller models (under ~14B parameters) ma
 ---
 
 ## Upgrading
+
+### From 0.5.0 to 0.5.5
+
+After `pipx upgrade bora`, run `bora dev upgrade` in each repo. That refreshes `AGENTS.md` to the 0.5.5 managed template (design, worktree, review, debug, verify, finish) and rewrites any already-installed ten-skill pack. Project briefings, Requirements, and tickets are untouched.
 
 ### From 0.4.5 to 0.5.0
 

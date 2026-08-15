@@ -154,11 +154,17 @@ def lint_ticket(ticket: Ticket, known_ids: set[str]) -> list[LintIssue]:
                 f"current_task {current!r} is not a task id in ## Implementation plan"
             ))
 
-    if fm.get("status") == "in-progress" and section is None:
-        issues.append(LintIssue(
-            p, "warning",
-            "status is in-progress but ticket has no ## Implementation plan section"
-        ))
+    if fm.get("status") == "in-progress":
+        if section is None:
+            issues.append(LintIssue(
+                p, "error",
+                "status is in-progress but ticket has no ## Implementation plan section"
+            ))
+        elif not parse_plan_tasks(section):
+            issues.append(LintIssue(
+                p, "error",
+                "status is in-progress but ## Implementation plan has no ### Tnn: tasks"
+            ))
 
     return issues
 

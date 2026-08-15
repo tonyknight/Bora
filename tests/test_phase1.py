@@ -29,7 +29,7 @@ def test_dev_init_creates_profile(runner):
         assert result.exit_code == 0, result.output
         prof = json.loads(Path(".bora/profile.json").read_text())
         assert prof["profile"] == "dev"
-        assert prof["version"] == "0.5.0"
+        assert prof["version"] == "0.5.5"
         assert "initialized_at" in prof
 
 
