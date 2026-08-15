@@ -340,11 +340,21 @@ def dev_init(project_path: str, tags: Optional[str], force: bool) -> None:
     click.echo(f"Created {status.relative_to(root)}")
     click.echo(f"Created {tickets.relative_to(root)}")
 
-    shown_path = f'"{path}"' if " " in path else path
     click.echo("\nDev project scaffolded. Next steps:")
-    click.echo(f"  1. Edit {briefing.relative_to(root)} to describe what you're building.")
-    click.echo("  2. Discuss architecture, then fill the Requirements file.")
-    click.echo(f'  3. Create your first ticket: bora dev ticket new {shown_path} "<title>"')
+    click.echo(f"  1. Edit {briefing.relative_to(root)}")
+    click.echo("     (or point your AI agent at it) so it describes what you're building.")
+    click.echo("  2. Discuss architecture with the agent. Approve the Requirements file")
+    click.echo("     when it looks right. Do not create tickets yourself.")
+    click.echo('  3. Tell the agent to go. It will:')
+    click.echo("       - create tickets from the Requirements Tasks Breakdown")
+    click.echo("       - ask once whether to use an isolated worktree")
+    click.echo("       - for each ticket: plan, TDD, verify, then review")
+    click.echo("       - show completed vs remaining after each ticket")
+    click.echo("         (it will not ask \"should I continue?\")")
+    click.echo("       - when the board is done, offer merge, PR, or keep")
+    click.echo("\n  You run bora for setup (init, skill install, upgrade).")
+    click.echo("  The agent runs ticket, plan, status, and lint commands.")
+    click.echo("  If skills are not installed yet: bora dev skill install all")
 
 
 # =============================================================================

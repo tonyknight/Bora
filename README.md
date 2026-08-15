@@ -11,7 +11,7 @@ Whether you're a developer building software with an AI coding agent, or a write
 
 Bora fixes this by maintaining a small, structured set of Markdown files inside your project. Any model — any tool — can read them to get oriented in seconds. The files travel with your project, stay in version control, and are always the authoritative source of what's happening and why.
 
-Bora 0.5.5 ships two isolated **profiles**:
+Bora 0.6.0 ships two isolated **profiles**:
 
 - **`dev`** — for software projects: hierarchical tickets, a dated Requirements spec, implementation plans on each ticket, a ten-skill pack (`bora`, `bora-plan`, `bora-tdd`, `bora-execute`, `bora-design`, `bora-worktree`, `bora-review`, `bora-debug`, `bora-verify`, `bora-finish`), and per-project status dashboards.
 - **`write`** — for writing projects: chapter scaffolding, research interaction logs, story context, and summary generation.
@@ -260,7 +260,7 @@ Plans live **on the ticket** (`## Implementation plan`), not in Requirements and
 
 ### AI tool skills
 
-Claude Code, OpenCode, Cursor, and other agentic tools support **skills** — directories containing a `SKILL.md` that the agent loads when its description matches the current task. Bora 0.5.5 ships a **pack** of ten skills:
+Claude Code, OpenCode, Cursor, and other agentic tools support **skills** — directories containing a `SKILL.md` that the agent loads when its description matches the current task. Bora 0.6.0 ships a **pack** of ten skills:
 
 | Skill | When it loads |
 |-------|----------------|
@@ -463,6 +463,10 @@ The same flows work with local models. Smaller models (under ~14B parameters) ma
 ---
 
 ## Upgrading
+
+### From 0.5.5 to 0.6.0
+
+After `pipx upgrade bora`, run `bora dev upgrade` in each repo. That refreshes `AGENTS.md` to the 0.6.0 managed template and rewrites any already-installed skill pack. Project briefings, Requirements, and tickets are untouched.
 
 ### From 0.5.0 to 0.5.5
 

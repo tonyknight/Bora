@@ -1,4 +1,4 @@
-"""Bora 0.5.5: expanded skill pack, Cursor install, stricter lint."""
+"""Bora 0.6.0: expanded skill pack, Cursor install, stricter lint."""
 
 from __future__ import annotations
 
@@ -27,9 +27,9 @@ def runner():
     return CliRunner()
 
 
-def test_version_is_055():
-    assert __version__ == "0.5.5"
-    assert AGENTS_TEMPLATE_VERSION == "0.5.5"
+def test_version_is_060():
+    assert __version__ == "0.6.0"
+    assert AGENTS_TEMPLATE_VERSION == "0.6.0"
 
 
 def test_skill_pack_has_ten_trigger_only_descriptions():
@@ -85,7 +85,7 @@ def test_skill_install_all_includes_cursor(runner):
 
 
 def test_agents_md_055_content():
-    assert 'version="0.5.5"' in AGENTS_MD
+    assert 'version="0.6.0"' in AGENTS_MD
     assert "bora-design" in AGENTS_MD
     assert "bora-finish" in AGENTS_MD
     assert "origin_branch" in AGENTS_MD
@@ -129,13 +129,13 @@ Current task:
         assert "Tnn" in (result.stderr + result.output) or "no ###" in (result.stderr + result.output).lower()
 
 
-def test_upgrade_writes_055_agents(runner):
+def test_upgrade_writes_060_agents(runner):
     with runner.isolated_filesystem():
         runner.invoke(main, ["dev", "init", SAMPLE])
         Path("AGENTS.md").write_text("# Old agents\n", encoding="utf-8")
         result = runner.invoke(main, ["dev", "upgrade"])
         assert result.exit_code == 0, result.output
         text = Path("AGENTS.md").read_text()
-        assert 'version="0.5.5"' in text
+        assert 'version="0.6.0"' in text
         assert "bora-design" in text
         assert "bora-finish" in text

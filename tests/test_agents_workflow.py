@@ -9,7 +9,7 @@ from bora.templates import AGENTS_MD, ticket_template
 
 
 def test_version_is_050():
-    assert __version__ == "0.5.5"
+    assert __version__ == "0.6.0"
 
 
 def test_agents_md_has_scope_guardrail_and_status():
