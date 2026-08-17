@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from .skill_pack import PACK_SKILLS, PACK_SKILL_NAMES_RE, SKILL_TEMPLATES
+from .skill_pack import PACK_SKILLS, PACK_SKILL_NAMES_RE, SKILL_TEMPLATES, render_pack_skill
 
 # A marker we look for in an existing SKILL.md before agreeing to remove it.
 # Conservative: we only manage skills we wrote ourselves.
@@ -111,7 +111,7 @@ def install(tool: Tool, *, project_root: Optional[Path] = None, force: bool = Fa
     for name in PACK_SKILLS:
         target_dir = root / name
         target_dir.mkdir(parents=True, exist_ok=True)
-        (target_dir / "SKILL.md").write_text(SKILL_TEMPLATES[name], encoding="utf-8")
+        (target_dir / "SKILL.md").write_text(render_pack_skill(name), encoding="utf-8")
     return InstallResult(tool=tool, path=bora_md, overwritten=overwritten)
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .routing import DEFAULT_SKILL_TIERS
+
 PACK_SKILLS = (
     "bora",
     "bora-plan",
@@ -180,6 +182,9 @@ hypothesis, plan collides with Requirements, or the human interrupted.
 
 Resume from Status.md, `current_task`, and `git log --grep=<ticket-id>`.
 
+Routine `bora-verify` is economy-class activity. Unexpected failure
+loads `bora-debug` (premium). Do not implement automatic model switching.
+
 ## Optional subagent mode
 
 If the harness can dispatch subagents and the human did not forbid them:
@@ -320,6 +325,8 @@ If root cause is a Requirements hole, **stop execute**, reopen
 `bora-design` with the human.
 
 A second failure on the same hypothesis still stops and blocks the ticket.
+
+Unexpected failure diagnosis is premium-class activity.
 """
 
 BORA_VERIFY_SKILL_MD = """---
@@ -342,6 +349,8 @@ Paste or quote enough output to show pass/fail. "Should pass" is a
 failure of this skill.
 
 `bora-tdd` and `bora-finish` both require this skill.
+
+Routine verification is economy-class activity.
 """
 
 BORA_FINISH_SKILL_MD = """---
@@ -399,3 +408,32 @@ SKILL_TEMPLATES: dict[str, str] = {
     "bora-verify": BORA_VERIFY_SKILL_MD,
     "bora-finish": BORA_FINISH_SKILL_MD,
 }
+
+_ADVISORY_ROUTING_NOTE = (
+    "The `model_tier` field is an advisory hint for the host. "
+    "Bora does not choose models."
+)
+
+
+def render_pack_skill(name: str) -> str:
+    """Return installed SKILL.md text with `model_tier` from Python defaults."""
+    text = SKILL_TEMPLATES[name]
+    if not text.startswith("---\n"):
+        raise ValueError(f"{name} skill template is missing YAML frontmatter")
+    rest = text[4:]
+    close = rest.find("\n---\n")
+    if close < 0:
+        raise ValueError(f"{name} skill template is missing a closing frontmatter fence")
+    frontmatter = rest[:close]
+    body = rest[close + len("\n---\n") :]
+    if not frontmatter.endswith("\n"):
+        frontmatter += "\n"
+    frontmatter += f"model_tier: {DEFAULT_SKILL_TIERS[name]}\n"
+    heading = f"# {name}\n"
+    idx = body.find(heading)
+    if idx >= 0:
+        insert_at = idx + len(heading)
+        body = body[:insert_at] + "\n" + _ADVISORY_ROUTING_NOTE + "\n" + body[insert_at:]
+    else:
+        body = "\n" + _ADVISORY_ROUTING_NOTE + "\n" + body.lstrip("\n")
+    return f"---\n{frontmatter}---\n{body}"
