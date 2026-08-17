@@ -15,7 +15,7 @@ import yaml
 from .paths import tag_key
 
 
-AGENTS_TEMPLATE_VERSION = "0.6.0"
+AGENTS_TEMPLATE_VERSION = "0.7.0"
 MANAGED_END = "<!-- bora-managed:end -->"
 MANAGED_START_RE = re.compile(
     r'<!--\s*bora-managed:start\s+version="([^"]+)"\s*-->'

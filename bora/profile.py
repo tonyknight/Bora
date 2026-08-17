@@ -11,7 +11,7 @@ from typing import Optional
 import click
 
 PROFILE_FILE = ".bora/profile.json"
-CURRENT_VERSION = "0.6.0"
+CURRENT_VERSION = "0.7.0"
 
 
 def profile_path(root: Path) -> Path:

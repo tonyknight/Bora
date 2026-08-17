@@ -28,8 +28,8 @@ def runner():
 
 
 def test_version_is_060():
-    assert __version__ == "0.6.0"
-    assert AGENTS_TEMPLATE_VERSION == "0.6.0"
+    assert __version__ == "0.7.0"
+    assert AGENTS_TEMPLATE_VERSION == "0.7.0"
 
 
 def test_skill_pack_has_ten_trigger_only_descriptions():
@@ -85,7 +85,7 @@ def test_skill_install_all_includes_cursor(runner):
 
 
 def test_agents_md_055_content():
-    assert 'version="0.6.0"' in AGENTS_MD
+    assert 'version="0.7.0"' in AGENTS_MD
     assert "bora-design" in AGENTS_MD
     assert "bora-finish" in AGENTS_MD
     assert "origin_branch" in AGENTS_MD
@@ -136,6 +136,6 @@ def test_upgrade_writes_060_agents(runner):
         result = runner.invoke(main, ["dev", "upgrade"])
         assert result.exit_code == 0, result.output
         text = Path("AGENTS.md").read_text()
-        assert 'version="0.6.0"' in text
+        assert 'version="0.7.0"' in text
         assert "bora-design" in text
         assert "bora-finish" in text
