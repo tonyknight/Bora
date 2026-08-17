@@ -54,6 +54,7 @@ from .skill import TOOLS, install as install_skill, list_status as skill_list_st
 from .status import write_status_md
 from .templates import AGENTS_MD, REQUIREMENTS_MD_TEMPLATE, render_project_frontmatter, render_project_md
 from .ticket import find_ticket, load_all_tickets, parse_ticket
+from .routing import RoutingConfigError, resolve_effective_routing
 
 
 # =============================================================================
@@ -860,6 +861,47 @@ def skill_list() -> None:
         else:
             mark = "installed (foreign SKILL.md)"
         click.echo(f"{s.tool.display:<{width_tool}}  {s.scope:<{width_scope}}  {mark:<28}  {s.path}")
+
+
+# =============================================================================
+# dev routing
+# =============================================================================
+
+_ROUTING_TIER_ORDER = ("premium", "standard", "economy", "local")
+
+
+@dev.group()
+def routing() -> None:
+    """Inspect model-tier routing (informational only)."""
+
+
+@routing.command("show")
+@click.argument("project_path")
+def routing_show(project_path: str) -> None:
+    """Print effective routing for a project.
+
+    Informational only: does not contact a router or write models.yaml.
+    """
+    root, _ = _dev_project(project_path)
+    try:
+        resolved = resolve_effective_routing(root)
+    except RoutingConfigError as exc:
+        click.echo(f"Configuration error: {exc}", err=True)
+        sys.exit(1)
+
+    status = "enabled" if resolved.enabled else "disabled"
+    click.echo("Bora model routing")
+    click.echo()
+    click.echo(f"Status: {status}")
+    click.echo()
+    click.echo(f"{'Tier':<9}  Route")
+    click.echo(f"{'-' * 9}  {'-' * 16}")
+    for tier in _ROUTING_TIER_ORDER:
+        if resolved.enabled:
+            route = resolved.tiers.get(tier) or "(unset)"
+        else:
+            route = "(unset)"
+        click.echo(f"{tier:<9}  {route}")
 
 
 # =============================================================================
