@@ -156,3 +156,76 @@ routing:
     )
     with pytest.raises(RoutingConfigError):
         load_models_config(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# bora dev routing show (CLI)
+# ---------------------------------------------------------------------------
+
+from click.testing import CliRunner
+
+from bora.cli import main
+
+SAMPLE = "Acme/Auth"
+
+
+def test_routing_show_disabled_without_models_yaml():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        result = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert result.exit_code == 0, result.output
+        assert "Status: disabled" in result.output
+        for tier in ("premium", "standard", "economy", "local"):
+            assert tier in result.output
+
+
+def test_routing_show_enabled_prints_mappings():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        _write_models_yaml(Path("."), VALID_YAML)
+        result = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert result.exit_code == 0, result.output
+        assert "Status: enabled" in result.output
+        for identifier in ("auto/smart", "auto/coding", "auto/cheap", "auto/offline"):
+            assert identifier in result.output
+
+
+def test_routing_show_invalid_yaml_exits_nonzero():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        _write_models_yaml(Path("."), "routing:\n  enabled: [\n")
+        result = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert result.exit_code != 0
+        combined = (result.output or "") + (result.stderr or "")
+        assert "traceback" not in combined.lower()
+        assert "configuration error" in combined.lower()
+
+
+def test_routing_show_makes_no_network_calls(monkeypatch):
+    import socket
+    import urllib.request
+
+    def _fail_urlopen(*_args, **_kwargs):
+        pytest.fail("unexpected urllib.request.urlopen")
+
+    def _fail_connect(*_args, **_kwargs):
+        pytest.fail("unexpected socket.create_connection")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fail_urlopen)
+    monkeypatch.setattr(socket, "create_connection", _fail_connect)
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        without = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert without.exit_code == 0, without.output
+        _write_models_yaml(Path("."), VALID_YAML)
+        with_yaml = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert with_yaml.exit_code == 0, with_yaml.output
