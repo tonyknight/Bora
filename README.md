@@ -11,7 +11,7 @@ Whether you're a developer building software with an AI coding agent, or a write
 
 Bora fixes this by maintaining a small, structured set of Markdown files inside your project. Any model — any tool — can read them to get oriented in seconds. The files travel with your project, stay in version control, and are always the authoritative source of what's happening and why.
 
-Bora 0.6.0 ships two isolated **profiles**:
+Bora 0.7.0 ships two isolated **profiles**:
 
 - **`dev`** — for software projects: hierarchical tickets, a dated Requirements spec, implementation plans on each ticket, a ten-skill pack (`bora`, `bora-plan`, `bora-tdd`, `bora-execute`, `bora-design`, `bora-worktree`, `bora-review`, `bora-debug`, `bora-verify`, `bora-finish`), and per-project status dashboards.
 - **`write`** — for writing projects: chapter scaffolding, research interaction logs, story context, and summary generation.
@@ -35,6 +35,7 @@ Bora 0.6.0 ships two isolated **profiles**:
   - [Obsidian integration](#obsidian-integration)
   - [Conventions](#write-conventions)
 - [Working across models](#working-across-models)
+- [Optional model routing](#optional-model-routing)
 - [Upgrading](#upgrading)
 - [Contributing](#contributing)
 
@@ -248,6 +249,7 @@ Plans live **on the ticket** (`## Implementation plan`), not in Requirements and
 | `bora dev status <project_path>` | Regenerate that project's `Status.md` from its ticket state. |
 | `bora dev context <project_path> [--budget N]` | Print briefing content for a fresh model session — root `AGENTS.md` plus that project's dated briefing, Requirements, `Status.md`, and in-progress/blocked tickets. Pass `--budget <tokens>` to get a token-bounded version. |
 | `bora dev lint <project_path>` | Validate frontmatter and cross-references across that project's tickets. Run this after any model writes to a ticket file. |
+| `bora dev routing show <project_path>` | Print the effective model-tier routing configuration. Informational only; does not contact a router. |
 | `bora dev upgrade [--dry-run] [--agents-only] [--skills-only] [--force]` | Refresh the managed region of root `AGENTS.md` and rewrite already-installed skill packs to match this CLI. Does not touch project briefings, Requirements, or tickets. See [Upgrading](#upgrading). |
 
 #### AI tool skills
@@ -260,7 +262,7 @@ Plans live **on the ticket** (`## Implementation plan`), not in Requirements and
 
 ### AI tool skills
 
-Claude Code, OpenCode, Cursor, and other agentic tools support **skills** — directories containing a `SKILL.md` that the agent loads when its description matches the current task. Bora 0.6.0 ships a **pack** of ten skills:
+Claude Code, OpenCode, Cursor, and other agentic tools support **skills** — directories containing a `SKILL.md` that the agent loads when its description matches the current task. Bora 0.7.0 ships a **pack** of ten skills:
 
 | Skill | When it loads |
 |-------|----------------|
@@ -462,7 +464,41 @@ The same flows work with local models. Smaller models (under ~14B parameters) ma
 
 ---
 
+## Optional model routing
+
+This is an **advanced, optional** feature. You can ignore it unless you already use a model router. It is not part of [Quick start](#quick-start-dev).
+
+Bora does not choose models. Bora identifies the relative reasoning requirements of its workflows and optionally communicates those requirements to compatible routing systems.
+
+Installed skills declare a provider-neutral `model_tier` (`premium`, `standard`, `economy`, or `local`). Hosts that do not understand the field ignore it. Bora never embeds provider model names such as a specific Claude or GPT snapshot.
+
+Users who want routing add `.bora/models.yaml` themselves. `bora dev init` and `bora dev upgrade` never create this file.
+
+```yaml
+routing:
+  enabled: true
+  tiers:
+    premium: auto/smart
+    standard: auto/coding
+    economy: auto/cheap
+    local: auto/offline
+  skills:
+    bora-review: economy
+```
+
+Values under `tiers` are opaque routing identifiers for your router (for example an OmniRoute alias). Bora does not interpret them as commercial model names. The optional `skills` map overrides the default tier for a pack skill without editing installed `SKILL.md` files.
+
+`bora dev routing show <project_path>` prints the effective configuration. It is informational and does not contact a router. Missing `models.yaml` is not an error: status is `disabled` and default tiers are still listed.
+
+OmniRoute is one example consumer: map Bora's `premium` / `standard` / `economy` / `local` hints to that system's routes. Any compatible router can do the same. Fallback policy, pricing, and provider selection stay in the router.
+
+---
+
 ## Upgrading
+
+### From 0.6.0 to 0.7.0
+
+After `pipx upgrade bora`, run `bora dev upgrade` in each repo. That refreshes `AGENTS.md` to the 0.7.0 managed template and rewrites any already-installed skill pack with `model_tier` frontmatter. It does **not** create `.bora/models.yaml` and does not touch project briefings, Requirements, or tickets. Existing 0.6.x projects remain valid without a routing file.
 
 ### From 0.5.5 to 0.6.0
 

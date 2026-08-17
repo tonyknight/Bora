@@ -309,3 +309,18 @@ def test_06x_profile_still_loads():
         show = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
         assert show.exit_code == 0, show.output
         assert not Path(".bora/models.yaml").exists()
+
+
+def test_readme_routing_is_advanced_not_quickstart():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    quote = (
+        "Bora does not choose models. Bora identifies the relative "
+        "reasoning requirements of its workflows and optionally communicates "
+        "those requirements to compatible routing systems."
+    )
+    assert quote in readme
+    start = readme.find("### Quick start (dev)")
+    end = readme.find("### Dev commands")
+    assert start != -1 and end != -1 and start < end
+    quickstart = readme[start:end]
+    assert "models.yaml" not in quickstart
