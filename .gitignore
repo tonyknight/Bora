@@ -29,5 +29,8 @@ ENV/
 .coverage
 htmlcov/
 
+# Isolated execute worktrees (not published)
+.worktrees/
+
 # Project docs (bora-managed, not published)
 docs/*
