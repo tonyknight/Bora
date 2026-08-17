@@ -319,8 +319,8 @@ def test_readme_routing_is_advanced_not_quickstart():
         "those requirements to compatible routing systems."
     )
     assert quote in readme
-    start = readme.find("### Quick start (dev)")
-    end = readme.find("### Dev commands")
+    start = readme.find("## Quick start (dev)")
+    end = readme.find("## Workflow cycle")
     assert start != -1 and end != -1 and start < end
     quickstart = readme[start:end]
     assert "models.yaml" not in quickstart
