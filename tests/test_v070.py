@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
+from bora import __version__
+from bora.profile import CURRENT_VERSION
+from bora.templates import AGENTS_TEMPLATE_VERSION
 from bora.routing import (
     DEFAULT_SKILL_TIERS,
     VALID_TIERS,
@@ -229,3 +233,79 @@ def test_routing_show_makes_no_network_calls(monkeypatch):
         _write_models_yaml(Path("."), VALID_YAML)
         with_yaml = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
         assert with_yaml.exit_code == 0, with_yaml.output
+
+
+# ---------------------------------------------------------------------------
+# Version, upgrade, and 0.6.x compatibility
+# ---------------------------------------------------------------------------
+
+
+def test_version_is_070():
+    assert __version__ == "0.7.0"
+    assert AGENTS_TEMPLATE_VERSION == "0.7.0"
+    assert CURRENT_VERSION == "0.7.0"
+
+
+def test_init_does_not_create_models_yaml():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert result.exit_code == 0, result.output
+        assert Path(".bora/profile.json").exists()
+        assert not Path(".bora/models.yaml").exists()
+
+
+def test_upgrade_does_not_create_models_yaml():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        install = runner.invoke(main, ["dev", "skill", "install", "cursor", "--project"])
+        assert install.exit_code == 0, install.output
+        upgrade = runner.invoke(main, ["dev", "upgrade"])
+        assert upgrade.exit_code == 0, upgrade.output
+        assert not Path(".bora/models.yaml").exists()
+
+
+def test_upgrade_rewrites_skills_without_touching_project_docs():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        project = Path("docs/ai/Acme/Auth")
+        before = {
+            path: path.read_bytes()
+            for path in project.rglob("*")
+            if path.is_file()
+        }
+        install = runner.invoke(main, ["dev", "skill", "install", "cursor", "--project"])
+        assert install.exit_code == 0, install.output
+        upgrade = runner.invoke(main, ["dev", "upgrade"])
+        assert upgrade.exit_code == 0, upgrade.output
+        after = {
+            path: path.read_bytes()
+            for path in project.rglob("*")
+            if path.is_file()
+        }
+        assert after == before
+        skill = Path(".cursor/skills/bora/SKILL.md")
+        assert skill.exists()
+        assert "model_tier" in skill.read_text(encoding="utf-8")
+
+
+def test_06x_profile_still_loads():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        path = Path(".bora/profile.json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["version"] = "0.6.0"
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        status = runner.invoke(main, ["dev", "status", SAMPLE])
+        assert status.exit_code == 0, status.output
+        lint = runner.invoke(main, ["dev", "lint", SAMPLE])
+        assert lint.exit_code == 0, lint.output
+        show = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert show.exit_code == 0, show.output
+        assert not Path(".bora/models.yaml").exists()
