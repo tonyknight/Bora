@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -176,3 +176,102 @@ def routing_cache_for_host(frontmatter: dict, host: str) -> dict[str, str]:
         if tier in VALID_TIERS and isinstance(slug, str) and slug.strip():
             out[str(tier)] = slug.strip()
     return out
+
+
+MATCH_MATCHED = "matched"
+MATCH_ASK = "ask"
+
+
+@dataclass
+class TierMatch:
+    """Result of matching one tier's alias list against available host models."""
+
+    status: str
+    slug: Optional[str] = None
+    candidates: list[str] = field(default_factory=list)
+    suggest: Optional[str] = None
+    alias: Optional[str] = None
+
+
+def _normalize_model_text(text: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9\-_/\s]", " ", text.lower())
+    return " ".join(cleaned.split())
+
+
+def _model_tokens(text: str) -> list[str]:
+    return [part for part in re.split(r"[\s\-_]+", _normalize_model_text(text)) if part]
+
+
+def _score_alias(alias: str, available: str) -> int:
+    needle = _normalize_model_text(alias)
+    haystack = _normalize_model_text(available)
+    if not needle or not haystack:
+        return 0
+    if needle == haystack:
+        return 3
+    if needle in haystack or haystack in needle:
+        return 2
+    haystack_tokens = set(_model_tokens(available))
+    if any(token in haystack or token in haystack_tokens for token in _model_tokens(alias)):
+        return 1
+    return 0
+
+
+def match_tier(
+    aliases: list[str],
+    available: list[str],
+    cache_slug: Optional[str] = None,
+) -> TierMatch:
+    """Fuzzy-match ordered aliases to injected available model names.
+
+    Unique hit → matched. Two or more hits for an alias, or none at all → ask.
+    ``cache_slug`` is suggested on ask only when it is still in ``available``.
+    """
+    models = [item.strip() for item in available if isinstance(item, str) and item.strip()]
+    cache_ok = cache_slug if isinstance(cache_slug, str) and cache_slug in models else None
+    for alias in aliases:
+        scored: dict[str, int] = {}
+        for model in models:
+            score = _score_alias(alias, model)
+            if score > 0:
+                scored[model] = score
+        if not scored:
+            continue
+        best = max(scored.values())
+        winners: list[str] = []
+        seen: set[str] = set()
+        for model, score in scored.items():
+            if score != best:
+                continue
+            key = _normalize_model_text(model)
+            if key in seen:
+                continue
+            seen.add(key)
+            winners.append(model)
+        if len(winners) == 1:
+            return TierMatch(status=MATCH_MATCHED, slug=winners[0], alias=alias)
+        return TierMatch(
+            status=MATCH_ASK,
+            candidates=winners,
+            suggest=cache_ok,
+            alias=alias,
+        )
+    return TierMatch(status=MATCH_ASK, candidates=[], suggest=cache_ok)
+
+
+def resolve_session(
+    tiers: dict[str, list[str]],
+    available: list[str],
+    host: str,
+    cache: Optional[dict] = None,
+) -> dict[str, TierMatch]:
+    """Match each tier for ``host``. Cache for other hosts is ignored."""
+    cache = cache or {}
+    raw_host = cache.get(host) if isinstance(cache, dict) else None
+    host_cache = raw_host if isinstance(raw_host, dict) else {}
+    resolved: dict[str, TierMatch] = {}
+    for tier, aliases in tiers.items():
+        hint = host_cache.get(tier)
+        cache_slug = hint if isinstance(hint, str) else None
+        resolved[tier] = match_tier(list(aliases), available, cache_slug=cache_slug)
+    return resolved
