@@ -327,7 +327,7 @@ def _normalize_project_frontmatter_dump(dumped: str) -> str:
     return dumped.replace("focus: ''", 'focus: ""')
 
 
-def render_project_frontmatter(hierarchy, tags, today):
+def render_project_frontmatter(hierarchy, tags, today, *, routing: bool = False):
     data = {}
     if tags:
         for label, segment in zip(tags, hierarchy):
@@ -336,12 +336,14 @@ def render_project_frontmatter(hierarchy, tags, today):
     data["hierarchy"] = list(hierarchy)
     data["last_reviewed"] = today
     data["focus"] = ""
+    if routing:
+        data["routing"] = True
     dumped = yaml.safe_dump(data, sort_keys=False, allow_unicode=True).rstrip()
     dumped = _normalize_project_frontmatter_dump(dumped)
     return f"---\n{dumped}\n---\n"
 
 
-def render_project_md(hierarchy, tags, today):
+def render_project_md(hierarchy, tags, today, *, routing: bool = False):
     body = """
 # Project
 
@@ -385,7 +387,7 @@ How will we know this project is done — or at least working?
 
 - Criterion 1
 """
-    return render_project_frontmatter(hierarchy, tags, today) + body
+    return render_project_frontmatter(hierarchy, tags, today, routing=routing) + body
 
 
 REQUIREMENTS_MD_TEMPLATE = """---

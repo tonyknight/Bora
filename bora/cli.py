@@ -149,6 +149,10 @@ def _project_root_or_none(project: bool) -> Optional[Path]:
     return require_repo_root()
 
 
+def _stdin_is_tty() -> bool:
+    return sys.stdin.isatty()
+
+
 def _get_skip_flag(ctx: click.Context) -> bool:
     """Walk up the context chain to find skip_profile_check from the root."""
     obj = ctx.obj
@@ -282,7 +286,18 @@ def dev(ctx: click.Context) -> None:
 @click.argument("project_path")
 @click.option("--tags", default=None, help="CSV labels matching path segments.")
 @click.option("--force", is_flag=True, help="Overwrite existing scaffold files.")
-def dev_init(project_path: str, tags: Optional[str], force: bool) -> None:
+@click.option(
+    "--routing/--no-routing",
+    "routing_opt_in",
+    default=None,
+    help="Opt this project into cost-efficiency routing (default: no).",
+)
+def dev_init(
+    project_path: str,
+    tags: Optional[str],
+    force: bool,
+    routing_opt_in: Optional[bool],
+) -> None:
     """Scaffold a hierarchical dev project under docs/ai/<project_path>/.
 
     PROJECT_PATH is required (Codebase/Target/Project, depth >= 2).
@@ -324,11 +339,23 @@ def dev_init(project_path: str, tags: Optional[str], force: bool) -> None:
     if not gitkeep.exists():
         gitkeep.write_text("", encoding="utf-8")
 
+    if routing_opt_in is None:
+        if _stdin_is_tty():
+            routing_opt_in = click.confirm(
+                "Use cost-efficiency routing for this project?",
+                default=False,
+            )
+        else:
+            routing_opt_in = False
+
     segments = parse_project_path(path)
     name = project_name(segments)
     today = date.today().isoformat()
     hierarchy = list(segments)
-    briefing.write_text(render_project_md(hierarchy, parsed_tags, today), encoding="utf-8")
+    briefing.write_text(
+        render_project_md(hierarchy, parsed_tags, today, routing=routing_opt_in),
+        encoding="utf-8",
+    )
     reqs_body = REQUIREMENTS_MD_TEMPLATE.split("---", 2)[-1].format(project_name=name)
     reqs.write_text(
         render_project_frontmatter(hierarchy, parsed_tags, today) + reqs_body,
@@ -340,6 +367,11 @@ def dev_init(project_path: str, tags: Optional[str], force: bool) -> None:
     click.echo(f"Created {reqs.relative_to(root)}")
     click.echo(f"Created {status.relative_to(root)}")
     click.echo(f"Created {tickets.relative_to(root)}")
+    if routing_opt_in and not (root / ".bora" / "models.yaml").exists():
+        click.echo(
+            "Note: add .bora/models.yaml with ordered aliases per tier. "
+            "Session resolve will ask until that file exists."
+        )
 
     click.echo("\nDev project scaffolded. Next steps:")
     click.echo(f"  1. Edit {briefing.relative_to(root)}")

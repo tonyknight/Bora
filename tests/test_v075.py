@@ -249,7 +249,7 @@ def test_init_routing_flag_writes_opt_in_not_models_yaml():
 
 
 def test_init_tty_prompt_default_no(monkeypatch):
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("bora.cli._stdin_is_tty", lambda: True)
     runner = CliRunner()
     with runner.isolated_filesystem():
         result = runner.invoke(main, ["dev", "init", SAMPLE], input="\n")

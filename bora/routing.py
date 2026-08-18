@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -128,3 +129,50 @@ def _validate_config(data: Any) -> None:
                     f"Invalid tier '{tier}' for skill '{skill}'. "
                     f"Valid tiers: {', '.join(sorted(VALID_TIERS))}"
                 )
+
+
+_FRONTMATTER_RE = re.compile(
+    r"\A---\s*\n(?P<frontmatter>.*?)\n---\s*\n(?P<body>.*)\Z",
+    re.DOTALL,
+)
+
+
+def _parse_frontmatter_text(text: str) -> dict:
+    match = _FRONTMATTER_RE.match(text)
+    if not match:
+        return {}
+    data = yaml.safe_load(match.group("frontmatter")) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def briefing_frontmatter(root: Path, project_path: str) -> dict:
+    """Return the project briefing YAML frontmatter, or {} if missing/unreadable."""
+    from .paths import project_file
+
+    path = project_file(root, project_path)
+    if not path.is_file():
+        return {}
+    try:
+        return _parse_frontmatter_text(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
+def project_is_routing_opted_in(root: Path, project_path: str) -> bool:
+    """True only when the briefing has ``routing: true``."""
+    return briefing_frontmatter(root, project_path).get("routing") is True
+
+
+def routing_cache_for_host(frontmatter: dict, host: str) -> dict[str, str]:
+    """Return last-resolved slugs for ``host``. Malformed cache → empty dict."""
+    cache = frontmatter.get("routing_cache")
+    if not isinstance(cache, dict):
+        return {}
+    host_map = cache.get(host)
+    if not isinstance(host_map, dict):
+        return {}
+    out: dict[str, str] = {}
+    for tier, slug in host_map.items():
+        if tier in VALID_TIERS and isinstance(slug, str) and slug.strip():
+            out[str(tier)] = slug.strip()
+    return out
