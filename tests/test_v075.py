@@ -440,3 +440,42 @@ def test_routing_resolve_is_read_only_and_prints_match():
         assert "grok-4-6" in result.output
         assert "composer-2" in result.output
         assert briefing.read_bytes() == before
+
+
+def test_version_is_075():
+    from bora import __version__
+    from bora.profile import CURRENT_VERSION
+    from bora.templates import AGENTS_TEMPLATE_VERSION
+
+    assert __version__ == "0.7.5"
+    assert CURRENT_VERSION == "0.7.5"
+    assert AGENTS_TEMPLATE_VERSION == "0.7.5"
+
+
+def test_bora_and_execute_document_session_resolve():
+    from bora.skill_pack import render_pack_skill
+
+    bora = render_pack_skill("bora").lower()
+    execute = render_pack_skill("bora-execute").lower()
+    for text in (bora, execute):
+        assert "routing: true" in text
+        assert "routing resolve" in text
+        assert "ask" in text
+        assert "routing_cache" in text
+        assert "does not choose models" in text
+
+
+def test_upgrade_does_not_add_routing_opt_in():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        briefing = project_file(Path("."), SAMPLE)
+        before = briefing.read_bytes()
+        install = runner.invoke(main, ["dev", "skill", "install", "cursor", "--project"])
+        assert install.exit_code == 0, install.output
+        upgrade = runner.invoke(main, ["dev", "upgrade"])
+        assert upgrade.exit_code == 0, upgrade.output
+        assert briefing.read_bytes() == before
+        assert "routing: true" not in briefing.read_text(encoding="utf-8")
+        assert not Path(".bora/models.yaml").exists()

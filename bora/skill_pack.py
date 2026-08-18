@@ -100,6 +100,22 @@ Read in this order:
 - **After any ticket write:** `bora dev lint` then `bora dev status`.
 
 See `AGENTS.md` for full command surface and frontmatter reference.
+
+## Session routing (opt-in)
+
+If the current project's briefing has `routing: true` and the repo
+catalog (`.bora/models.yaml`) is enabled, resolve **this session**
+before spawning subagents:
+
+1. Collect the model ids this host can actually run (from the harness,
+   not from the `bora` CLI).
+2. Write them to a temp file, one per line, then run
+   `bora dev routing resolve <project_path> --host <cursor|claude|opencode> --available <file>`.
+3. If a tier result is ASK, ask the human. Do not invent a model id.
+4. Pass matched host slugs into subagent starts when the host API
+   accepts a model id.
+5. After unique matches, update briefing `routing_cache` for this host.
+   Cache is a hint only; resolve again next session.
 """
 
 BORA_PLAN_SKILL_MD = """---
@@ -158,6 +174,11 @@ at a time.
 
 1. Load **`bora-worktree`** (consent once; record `origin_branch` on
    the briefing frontmatter).
+2. If the briefing has `routing: true` and the repo catalog is enabled,
+   resolve this session (`bora dev routing resolve` with an injected
+   available-model list). ASK means ask the human. Pass slugs to
+   subagents when the host supports it. Update `routing_cache` after
+   unique matches; it is a hint only.
 
 ## Per ticket
 
