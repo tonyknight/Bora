@@ -186,3 +186,92 @@ routing:
     )
     with pytest.raises(RoutingConfigError):
         load_models_config(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Project opt-in and init
+# ---------------------------------------------------------------------------
+
+from click.testing import CliRunner
+
+from bora.cli import main
+from bora.paths import project_file
+from bora.routing import briefing_frontmatter, project_is_routing_opted_in
+
+SAMPLE = "Acme/Auth"
+
+
+def test_briefing_without_routing_is_not_opted_in():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert result.exit_code == 0, result.output
+        root = Path(".")
+        assert project_is_routing_opted_in(root, SAMPLE) is False
+        fm = briefing_frontmatter(root, SAMPLE)
+        assert "routing" not in fm
+
+
+def test_routing_true_is_opted_in():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert result.exit_code == 0, result.output
+        path = project_file(Path("."), SAMPLE)
+        text = path.read_text(encoding="utf-8")
+        path.write_text(text.replace("---\n", "---\nrouting: true\n", 1), encoding="utf-8")
+        assert project_is_routing_opted_in(Path("."), SAMPLE) is True
+
+
+def test_init_no_routing_and_non_tty_do_not_opt_in():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        assert result.exit_code == 0, result.output
+        assert project_is_routing_opted_in(Path("."), SAMPLE) is False
+        assert "routing: true" not in project_file(Path("."), SAMPLE).read_text(
+            encoding="utf-8"
+        )
+        assert not Path(".bora/models.yaml").exists()
+
+
+def test_init_routing_flag_writes_opt_in_not_models_yaml():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", SAMPLE, "--routing"])
+        assert result.exit_code == 0, result.output
+        assert project_is_routing_opted_in(Path("."), SAMPLE) is True
+        text = project_file(Path("."), SAMPLE).read_text(encoding="utf-8")
+        assert "routing: true" in text
+        assert not Path(".bora/models.yaml").exists()
+        combined = result.output.lower()
+        assert "models.yaml" in combined or "alias" in combined
+
+
+def test_init_tty_prompt_default_no(monkeypatch):
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", SAMPLE], input="\n")
+        assert result.exit_code == 0, result.output
+        assert "Use cost-efficiency routing for this project?" in result.output
+        assert project_is_routing_opted_in(Path("."), SAMPLE) is False
+
+
+def test_malformed_routing_cache_is_ignored():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert result.exit_code == 0, result.output
+        path = project_file(Path("."), SAMPLE)
+        text = path.read_text(encoding="utf-8")
+        path.write_text(
+            text.replace("---\n", "---\nrouting: true\nrouting_cache: not-a-map\n", 1),
+            encoding="utf-8",
+        )
+        from bora.routing import routing_cache_for_host
+
+        cache = routing_cache_for_host(
+            briefing_frontmatter(Path("."), SAMPLE), "cursor"
+        )
+        assert cache == {}
