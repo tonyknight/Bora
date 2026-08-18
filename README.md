@@ -6,7 +6,7 @@
 
 A new chat starts from zero. Switching models starts the briefing over. Bora fixes both by putting the project’s source of truth in the repo: what you’re building, the spec, the tickets, and the commit-sized plan for each ticket. Any model that can read files can pick up where the last one left off.
 
-Bora 0.7.0 has two profiles:
+Bora 0.7.5 has two profiles:
 
 | Profile | For | You type | The agent runs |
 | --- | --- | --- | --- |
@@ -21,7 +21,7 @@ Bora 0.7.0 has two profiles:
 
 **A defined workflow cycle.** Human and agent agree architecture, then write Requirements. You say **go**. The agent creates tickets from the Tasks Breakdown, plans each ticket, implements with TDD, verifies, reviews, and continues until the board is empty. You watch commits of the form `{ticket-id} T01: …`. Merge and PR stay your git.
 
-**Optional model routing.** Skills declare a provider-neutral `model_tier`. A router such as OmniRoute can map `premium` / `standard` / `economy` / `local` to models. Bora does not choose models. Skip this unless you already route.
+**Optional model routing.** Skills declare a provider-neutral `model_tier`. A repo catalog can list fallback aliases per tier; a Bora project may opt in so each session fuzzy-matches those aliases to models **this** host can run. Bora does not choose models. Skip this unless you want cost-efficiency routing.
 
 **Skills for agentic tools.** Claude Code, Cursor, and OpenCode get a ten-skill pack (`bora-design` → `bora-execute` → `bora-tdd` → `bora-finish`). Install user-level or **`--project`** so the pack is committed with the repo.
 
@@ -192,29 +192,50 @@ Uninstall only removes bora-owned skill directories unless you pass `--force`.
 
 ## Optional model routing
 
-Advanced. Ignore this unless you already use a model router. Not part of [Quick start](#quick-start-dev).
+Advanced. Ignore this unless you want cost-efficiency routing or already use a router. Not part of [Quick start](#quick-start-dev).
 
 Bora does not choose models. Bora identifies the relative reasoning requirements of its workflows and optionally communicates those requirements to compatible routing systems.
 
 On install/upgrade, each skill’s frontmatter includes `model_tier`: `premium`, `standard`, `economy`, or `local`. Hosts that don’t understand the field ignore it. Core skills never embed provider model names.
 
-Add `.bora/models.yaml` yourself if you want mappings. `init` and `upgrade` never create it.
+Three layers:
+
+1. **Repo catalog** — optional `.bora/models.yaml`. Each tier is an **ordered list** of aliases (YAML lists are canonical; comma-separated strings work; a 0.7.0 single string is a one-item list). `init` and `upgrade` never create this file.
+2. **Project opt-in** — briefing `routing: true`. `bora dev init` asks (default **no**); `--routing` / `--no-routing` for scripts. Non-TTY init does not prompt.
+3. **Session resolve** — every session, fuzzy-match aliases against models **this** Cursor, Claude Code, or OpenCode host can run. Ask if nothing matches or two hits are equally plausible. Optional `routing_cache` on the briefing is a per-tool hint, not the source of truth.
 
 ```yaml
 routing:
   enabled: true
   tiers:
-    premium: auto/smart
-    standard: auto/coding
-    economy: auto/cheap
-    local: auto/offline
+    premium:
+      - grok latest high
+      - claude opus
+      - gpt-5
+    standard:
+      - composer
+      - sonnet
+      - gpt-5-mini
+    economy:
+      - glm latest
+      - haiku
+      - gpt-5-nano
+    local:
+      - ollama
   skills:
     bora-review: economy
 ```
 
-`tiers` values are opaque identifiers for *your* router (for example an OmniRoute alias). `skills` overrides a default without editing installed `SKILL.md` files.
+Cursor and Claude Code are first-class: the **agent** supplies the available-model list; the CLI never queries those products.
 
-`bora dev routing show <project_path>` prints the effective table. Missing yaml → `Status: disabled`, not an error. Pricing, fallbacks, and provider selection stay in the router.
+```bash
+bora dev routing show <project_path>
+bora dev routing resolve <project_path> --host cursor --available models.txt
+```
+
+`show` prints ordered candidates and whether this project opted in. `resolve` is read-only and takes `--available` (one id or display name per line). Missing yaml → `Status: disabled`, not an error.
+
+OmniRoute remains optional: opaque aliases in the catalog still work when they appear in the host’s available set. Pricing and provider selection stay outside Bora.
 
 ---
 
@@ -261,6 +282,8 @@ bora dev upgrade          # AGENTS.md managed region + installed skills
 
 **0.6.0 → 0.7.0:** skills gain `model_tier`. No `.bora/models.yaml` is created. Project docs are untouched. 0.6.x projects remain valid.
 
+**0.7.0 → 0.7.5:** catalog tiers may be lists; per-project `routing: true` opt-in; `bora dev routing resolve` matches an injected available-model list. `upgrade` does not create `models.yaml` or add opt-in to existing briefings.
+
 Do not use `bora dev init --force` as an upgrade path. Review `git diff AGENTS.md` and keep local rules under **Project-specific instructions**.
 
 Older jumps (0.5.x skill pack, 0.4.5 hierarchy, 0.3.x `dev`/`write` split): run `bora dev upgrade` the same way. 0.4.5 replaced flat `docs/ai/Project.md` with hierarchical projects; there is no automated migration.
@@ -286,7 +309,7 @@ python -m pytest tests/ -v
 | Module | Role |
 | --- | --- |
 | `cli.py` | `dev` / `write` commands |
-| `routing.py` | Model tiers and `.bora/models.yaml` |
+| `routing.py` | Model tiers, catalog lists, session match |
 | `ticket.py` / `plan.py` / `status.py` / `lint.py` | Board |
 | `skill.py` / `skill_pack.py` | Dev skill pack |
 | `templates.py` | Scaffolded files |

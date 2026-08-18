@@ -479,3 +479,15 @@ def test_upgrade_does_not_add_routing_opt_in():
         assert briefing.read_bytes() == before
         assert "routing: true" not in briefing.read_text(encoding="utf-8")
         assert not Path(".bora/models.yaml").exists()
+
+
+def test_readme_covers_lists_opt_in_and_resolve():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "routing: true" in readme
+    assert "routing resolve" in readme
+    assert "Cursor" in readme and "Claude Code" in readme
+    assert "OmniRoute" in readme
+    start = readme.find("## Quick start (dev)")
+    end = readme.find("## Workflow cycle")
+    quickstart = readme[start:end]
+    assert "models.yaml" not in quickstart
