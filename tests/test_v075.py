@@ -275,3 +275,81 @@ def test_malformed_routing_cache_is_ignored():
             briefing_frontmatter(Path("."), SAMPLE), "cursor"
         )
         assert cache == {}
+
+
+# ---------------------------------------------------------------------------
+# Session matcher
+# ---------------------------------------------------------------------------
+
+from bora.routing import MATCH_ASK, MATCH_MATCHED, match_tier, resolve_session
+
+
+def test_first_unique_alias_wins():
+    result = match_tier(
+        ["grok latest high", "claude opus", "gpt-5"],
+        ["composer-2", "grok-4-6", "gpt-5-mini"],
+    )
+    assert result.status == MATCH_MATCHED
+    assert result.slug == "grok-4-6"
+
+
+def test_ambiguous_alias_asks():
+    result = match_tier(
+        ["sonnet"],
+        ["claude-sonnet-4-6", "claude-sonnet-4-5"],
+    )
+    assert result.status == MATCH_ASK
+    assert result.slug is None
+    assert "claude-sonnet-4-6" in result.candidates
+    assert "claude-sonnet-4-5" in result.candidates
+
+
+def test_no_alias_match_asks():
+    result = match_tier(["grok latest high"], ["composer-2", "gpt-5-mini"])
+    assert result.status == MATCH_ASK
+    assert result.slug is None
+    assert result.candidates == []
+
+
+def test_cursor_cache_ignored_for_claude_host():
+    aliases = {"premium": ["opus"]}
+    available = ["claude-opus-4-6"]
+    cache = {"cursor": {"premium": "grok-4-6"}}
+    session = resolve_session(aliases, available, host="claude", cache=cache)
+    assert session["premium"].status == MATCH_MATCHED
+    assert session["premium"].slug == "claude-opus-4-6"
+    assert session["premium"].suggest is None
+
+
+def test_unique_match_overrides_stale_cache():
+    result = match_tier(
+        ["composer"],
+        ["composer-2", "glm-4.6"],
+        cache_slug="glm-4.6",
+    )
+    assert result.status == MATCH_MATCHED
+    assert result.slug == "composer-2"
+
+
+def test_failed_match_suggests_still_available_cache():
+    result = match_tier(
+        ["grok latest high"],
+        ["composer-2", "glm-4.6"],
+        cache_slug="glm-4.6",
+    )
+    assert result.status == MATCH_ASK
+    assert result.slug is None
+    assert result.suggest == "glm-4.6"
+
+
+def test_match_tier_makes_no_network_calls(monkeypatch):
+    import socket
+    import urllib.request
+
+    def _fail(*_args, **_kwargs):
+        pytest.fail("unexpected network I/O")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fail)
+    monkeypatch.setattr(socket, "create_connection", _fail)
+    match_tier(["composer"], ["composer-2"])
+    resolve_session({"standard": ["composer"]}, ["composer-2"], host="cursor", cache={})
