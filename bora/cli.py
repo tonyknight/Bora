@@ -54,7 +54,15 @@ from .skill import TOOLS, install as install_skill, list_status as skill_list_st
 from .status import write_status_md
 from .templates import AGENTS_MD, REQUIREMENTS_MD_TEMPLATE, render_project_frontmatter, render_project_md
 from .ticket import find_ticket, load_all_tickets, parse_ticket
-from .routing import RoutingConfigError, resolve_effective_routing
+from .routing import (
+    MATCH_MATCHED,
+    RoutingConfigError,
+    briefing_frontmatter,
+    project_is_routing_opted_in,
+    resolve_effective_routing,
+    resolve_session,
+    routing_cache_for_host,
+)
 
 
 # =============================================================================
@@ -914,7 +922,7 @@ def routing_show(project_path: str) -> None:
 
     Informational only: does not contact a router or write models.yaml.
     """
-    root, _ = _dev_project(project_path)
+    root, project_path = _dev_project(project_path)
     try:
         resolved = resolve_effective_routing(root)
     except RoutingConfigError as exc:
@@ -922,18 +930,88 @@ def routing_show(project_path: str) -> None:
         sys.exit(1)
 
     status = "enabled" if resolved.enabled else "disabled"
+    opted = "yes" if project_is_routing_opted_in(root, project_path) else "no"
     click.echo("Bora model routing")
     click.echo()
     click.echo(f"Status: {status}")
+    click.echo(f"Project opt-in: {opted}")
     click.echo()
-    click.echo(f"{'Tier':<9}  Route")
+    click.echo(f"{'Tier':<9}  Candidates")
     click.echo(f"{'-' * 9}  {'-' * 16}")
     for tier in _ROUTING_TIER_ORDER:
         if resolved.enabled:
-            route = resolved.tiers.get(tier) or "(unset)"
+            aliases = resolved.tiers.get(tier) or []
+            route = ", ".join(aliases) if aliases else "(unset)"
         else:
             route = "(unset)"
         click.echo(f"{tier:<9}  {route}")
+
+
+@routing.command("resolve")
+@click.argument("project_path")
+@click.option(
+    "--host",
+    type=click.Choice(["claude", "cursor", "opencode"]),
+    required=True,
+    help="Current agent host (cache key).",
+)
+@click.option(
+    "--available",
+    "available_path",
+    required=True,
+    type=click.Path(),
+    help="Text file of model ids/names this host can run, one per line.",
+)
+def routing_resolve(project_path: str, host: str, available_path: str) -> None:
+    """Match catalog aliases to an injected available-model list.
+
+    Read-only: does not write briefing cache or contact a host.
+    """
+    root, project_path = _dev_project(project_path)
+    available_file = Path(available_path)
+    if not available_file.is_file():
+        click.echo(f"Error: available-models file not found: {available_path}", err=True)
+        sys.exit(1)
+
+    try:
+        resolved = resolve_effective_routing(root)
+    except RoutingConfigError as exc:
+        click.echo(f"Configuration error: {exc}", err=True)
+        sys.exit(1)
+
+    if not resolved.enabled:
+        click.echo("Error: routing catalog is disabled or missing.", err=True)
+        sys.exit(1)
+    if not project_is_routing_opted_in(root, project_path):
+        click.echo(
+            "Error: project is not opted in (set briefing routing: true).",
+            err=True,
+        )
+        sys.exit(1)
+
+    available = [
+        line.strip()
+        for line in available_file.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    cache = routing_cache_for_host(briefing_frontmatter(root, project_path), host)
+    session = resolve_session(
+        resolved.tiers, available, host=host, cache={host: cache}
+    )
+    click.echo(f"Bora routing resolve ({host})")
+    click.echo()
+    click.echo(f"{'Tier':<9}  Result")
+    click.echo(f"{'-' * 9}  {'-' * 16}")
+    for tier in _ROUTING_TIER_ORDER:
+        match = session.get(tier)
+        if match is None:
+            click.echo(f"{tier:<9}  (unset)")
+        elif match.status == MATCH_MATCHED:
+            click.echo(f"{tier:<9}  {match.slug}")
+        elif match.suggest:
+            click.echo(f"{tier:<9}  ASK (suggest: {match.suggest})")
+        else:
+            click.echo(f"{tier:<9}  ASK")
 
 
 # =============================================================================

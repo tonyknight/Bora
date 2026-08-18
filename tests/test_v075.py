@@ -353,3 +353,90 @@ def test_match_tier_makes_no_network_calls(monkeypatch):
     monkeypatch.setattr(socket, "create_connection", _fail)
     match_tier(["composer"], ["composer-2"])
     resolve_session({"standard": ["composer"]}, ["composer-2"], host="cursor", cache={})
+
+
+# ---------------------------------------------------------------------------
+# CLI show + resolve
+# ---------------------------------------------------------------------------
+
+
+def test_routing_show_lists_and_opt_in():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE, "--routing"])
+        assert init.exit_code == 0, init.output
+        _write_models_yaml(Path("."), LIST_YAML)
+        result = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert result.exit_code == 0, result.output
+        assert "Status: enabled" in result.output
+        assert "Project opt-in: yes" in result.output
+        assert "grok latest high, claude opus, gpt-5" in result.output
+        assert "composer, sonnet, gpt-5-mini" in result.output
+
+
+def test_routing_show_opt_in_no_without_flag():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        result = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert result.exit_code == 0, result.output
+        assert "Project opt-in: no" in result.output
+
+
+def test_routing_resolve_missing_available_file():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE, "--routing"])
+        assert init.exit_code == 0, init.output
+        _write_models_yaml(Path("."), LIST_YAML)
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "resolve", SAMPLE, "--host", "cursor", "--available", "missing.txt"],
+        )
+        assert result.exit_code != 0
+        combined = (result.output or "") + (result.stderr or "")
+        assert "not found" in combined.lower()
+
+
+def test_routing_resolve_requires_opt_in_and_catalog():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE])
+        assert init.exit_code == 0, init.output
+        Path("models.txt").write_text("composer-2\n", encoding="utf-8")
+        missing = runner.invoke(
+            main,
+            ["dev", "routing", "resolve", SAMPLE, "--host", "cursor", "--available", "models.txt"],
+        )
+        assert missing.exit_code != 0
+        _write_models_yaml(Path("."), LIST_YAML)
+        not_opted = runner.invoke(
+            main,
+            ["dev", "routing", "resolve", SAMPLE, "--host", "cursor", "--available", "models.txt"],
+        )
+        assert not_opted.exit_code != 0
+        combined = (not_opted.output or "") + (not_opted.stderr or "")
+        assert "opted" in combined.lower()
+
+
+def test_routing_resolve_is_read_only_and_prints_match():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        init = runner.invoke(main, ["dev", "init", SAMPLE, "--routing"])
+        assert init.exit_code == 0, init.output
+        _write_models_yaml(Path("."), LIST_YAML)
+        briefing = project_file(Path("."), SAMPLE)
+        before = briefing.read_bytes()
+        Path("models.txt").write_text(
+            "grok-4-6\ncomposer-2\nhaiku-4-5\nollama\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "resolve", SAMPLE, "--host", "cursor", "--available", "models.txt"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "grok-4-6" in result.output
+        assert "composer-2" in result.output
+        assert briefing.read_bytes() == before
