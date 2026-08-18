@@ -33,7 +33,7 @@ class RoutingConfigError(ValueError):
 @dataclass
 class EffectiveRouting:
     enabled: bool
-    tiers: dict[str, str]
+    tiers: dict[str, list[str]]
     skill_tiers: dict[str, str]
 
 
@@ -64,10 +64,33 @@ def resolve_effective_routing(root: Path) -> EffectiveRouting:
     routing = data["routing"]
     enabled = bool(routing.get("enabled", False))
     raw_tiers = routing.get("tiers") or {}
-    tiers = {name: identifier for name, identifier in raw_tiers.items()}
+    tiers = {name: list(aliases) for name, aliases in raw_tiers.items()}
     overrides = routing.get("skills") or {}
     skill_tiers.update(overrides)
     return EffectiveRouting(enabled=enabled, tiers=tiers, skill_tiers=skill_tiers)
+
+
+def _aliases_from_value(name: str, value: Any) -> list[str]:
+    """Normalize a tier value to an ordered non-empty list of aliases."""
+    if isinstance(value, str):
+        aliases = [part.strip() for part in value.split(",") if part.strip()]
+    elif isinstance(value, list):
+        aliases = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise RoutingConfigError(
+                    f"Tier '{name}' identifier must be a non-empty string"
+                )
+            aliases.append(item.strip())
+    else:
+        raise RoutingConfigError(
+            f"Tier '{name}' identifier must be a non-empty string or list of strings"
+        )
+    if not aliases:
+        raise RoutingConfigError(
+            f"Tier '{name}' must have at least one non-empty alias"
+        )
+    return aliases
 
 
 def _validate_config(data: Any) -> None:
@@ -83,16 +106,13 @@ def _validate_config(data: Any) -> None:
     if tiers is not None:
         if not isinstance(tiers, dict):
             raise RoutingConfigError("'routing.tiers' must be a mapping")
-        for name, identifier in tiers.items():
+        for name, identifier in list(tiers.items()):
             if name not in VALID_TIERS:
                 raise RoutingConfigError(
                     f"Unknown tier name '{name}'. "
                     f"Valid tiers: {', '.join(sorted(VALID_TIERS))}"
                 )
-            if not isinstance(identifier, str) or not identifier.strip():
-                raise RoutingConfigError(
-                    f"Tier '{name}' identifier must be a non-empty string"
-                )
+            tiers[name] = _aliases_from_value(name, identifier)
 
     skills = routing.get("skills")
     if skills is not None:

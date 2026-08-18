@@ -70,7 +70,7 @@ def test_valid_models_yaml_enables_and_maps_tiers(tmp_path):
     _write_models_yaml(tmp_path, VALID_YAML)
     resolved = resolve_effective_routing(tmp_path)
     assert resolved.enabled is True
-    assert resolved.tiers["premium"] == "auto/smart"
+    assert resolved.tiers["premium"] == ["auto/smart"]
     assert resolved.skill_tiers["bora-review"] == "economy"
     for skill, tier in DEFAULT_SKILL_TIERS.items():
         if skill == "bora-review":
