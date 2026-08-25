@@ -1,7 +1,7 @@
 {
-  "version": "0.6.0",
+  "version": "0.7.5",
   "profile": "dev",
-  "initialized_at": "2026-06-29T01:33:18.502416+00:00",
+  "initialized_at": "2026-08-17T23:49:34.069475+00:00",
   "config": {
     "auto_archive": true,
     "research_log_mode": "full_interaction"

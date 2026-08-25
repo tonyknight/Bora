@@ -1,6 +1,6 @@
 # Agent Instructions
 
-<!-- bora-managed:start version="0.6.0" -->
+<!-- bora-managed:start version="0.7.5" -->
 ## Philosophy
 
 This project uses a structured collaboration framework. Documentation in
