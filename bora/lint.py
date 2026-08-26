@@ -41,6 +41,10 @@ class LintIssue:
 
 COMPLETION_REPORT_HEADER = "## Completion report"
 _H2_RE = re.compile(r"^## ", re.MULTILINE)
+# Anchored to the start of a line so prose that merely *mentions*
+# "## Completion report" (e.g. in backticks, describing this very feature)
+# is never mistaken for the actual heading.
+_COMPLETION_HEADER_RE = re.compile(r"^## Completion report[ \t]*$", re.MULTILINE)
 _COMPLETION_FIELD_RE = re.compile(
     r"-\s*\*\*(Outcome|Files|Errors|Verify):\*\*\s*(.*)$", re.MULTILINE
 )
@@ -48,12 +52,13 @@ _COMPLETION_FIELD_RE = re.compile(
 
 def _completion_report_section(body: str) -> Optional[str]:
     """Return the `## Completion report` section text, or None if absent."""
-    idx = body.find(COMPLETION_REPORT_HEADER)
-    if idx < 0:
+    match = _COMPLETION_HEADER_RE.search(body)
+    if match is None:
         return None
-    rest = body[idx + len(COMPLETION_REPORT_HEADER) :]
+    idx = match.start()
+    rest = body[match.end() :]
     nxt = _H2_RE.search(rest)
-    end = idx + len(COMPLETION_REPORT_HEADER) + nxt.start() if nxt else len(body)
+    end = match.end() + nxt.start() if nxt else len(body)
     return body[idx:end]
 
 

@@ -727,3 +727,32 @@ def test_lint_ignores_empty_completion_report_on_non_done_ticket():
         runner.invoke(main, ["dev", "ticket", "new", SAMPLE, "Some ticket", "--no-edit"])
         result = runner.invoke(main, ["dev", "lint", SAMPLE])
         assert result.exit_code == 0, result.output
+
+
+def test_lint_not_confused_by_completion_report_mentioned_in_prose():
+    """A ticket that *discusses* the `## Completion report` heading in its
+    Description (e.g. a ticket about this very feature) must not have that
+    prose mistaken for the real heading — the section is only real when it
+    appears as an actual markdown heading, not as backtick-quoted text
+    earlier in the body."""
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        runner.invoke(main, ["dev", "ticket", "new", SAMPLE, "Some ticket", "--no-edit"])
+        tickets_dir = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "tickets"
+        path = next(p for p in tickets_dir.glob("*.md") if p.name != ".gitkeep")
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("status: todo", "status: done")
+        text = text.replace("closed:\n", "closed: 2026-08-25\n", 1)
+        text = text.replace(
+            "What is this ticket and why does it exist?",
+            "Add the `## Completion report` section to the ticket template.",
+        )
+        text = text.replace("- **Outcome:**", "- **Outcome:** did the thing")
+        text = text.replace("- **Files:**", "- **Files:** bora/foo.py")
+        text = text.replace("- **Errors:**", "- **Errors:** none")
+        text = text.replace("- **Verify:**", "- **Verify:** pytest — 5 passed")
+        path.write_text(text, encoding="utf-8")
+
+        result = runner.invoke(main, ["dev", "lint", SAMPLE])
+        assert result.exit_code == 0, result.output
