@@ -639,3 +639,91 @@ def test_routing_show_reports_synced_routing_file_with_pinned_marker():
         assert "Project routing file:" in result.output
         assert "hand-picked-model" in result.output
         assert "[pinned]" in result.output
+
+
+# --- Ticket completion fragments (ticket 06) ---------------------------------
+
+def test_ticket_new_includes_completion_report_section():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        result = runner.invoke(main, ["dev", "ticket", "new", SAMPLE, "Some ticket", "--no-edit"])
+        assert result.exit_code == 0, result.output
+        tickets_dir = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "tickets"
+        files = [p for p in tickets_dir.glob("*.md") if p.name != ".gitkeep"]
+        assert len(files) == 1
+        text = files[0].read_text(encoding="utf-8")
+        assert "## Completion report" in text
+        assert "**Outcome:**" in text
+        assert "**Files:**" in text
+        assert "**Errors:**" in text
+        assert "**Verify:**" in text
+
+
+def _ticket_path(td, name):
+    return Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "tickets" / name
+
+
+def test_lint_errors_on_done_ticket_with_empty_completion_report():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        runner.invoke(main, ["dev", "ticket", "new", SAMPLE, "Some ticket", "--no-edit"])
+        tickets_dir = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "tickets"
+        path = next(p for p in tickets_dir.glob("*.md") if p.name != ".gitkeep")
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("status: todo", "status: done").replace("closed:\n", "closed: 2026-08-25\n", 1)
+        path.write_text(text, encoding="utf-8")
+
+        result = runner.invoke(main, ["dev", "lint", SAMPLE])
+        assert result.exit_code != 0
+        assert "Completion report" in result.output
+
+
+def test_lint_passes_on_done_ticket_with_filled_completion_report():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        runner.invoke(main, ["dev", "ticket", "new", SAMPLE, "Some ticket", "--no-edit"])
+        tickets_dir = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "tickets"
+        path = next(p for p in tickets_dir.glob("*.md") if p.name != ".gitkeep")
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("status: todo", "status: done").replace("closed:\n", "closed: 2026-08-25\n", 1)
+        text = text.replace("- **Outcome:**", "- **Outcome:** did the thing")
+        text = text.replace("- **Files:**", "- **Files:** bora/foo.py")
+        text = text.replace("- **Errors:**", "- **Errors:** none")
+        text = text.replace("- **Verify:**", "- **Verify:** pytest — 5 passed")
+        path.write_text(text, encoding="utf-8")
+
+        result = runner.invoke(main, ["dev", "lint", SAMPLE])
+        assert result.exit_code == 0, result.output
+
+
+def test_lint_warns_not_errors_on_legacy_done_ticket_without_section():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        runner.invoke(main, ["dev", "ticket", "new", SAMPLE, "Some ticket", "--no-edit"])
+        tickets_dir = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "tickets"
+        path = next(p for p in tickets_dir.glob("*.md") if p.name != ".gitkeep")
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("status: todo", "status: done").replace("closed:\n", "closed: 2026-08-25\n", 1)
+        # Strip the whole Completion report section to simulate a pre-0.8.0 ticket.
+        start = text.index("## Completion report")
+        end = text.index("## Notes")
+        text = text[:start] + text[end:]
+        path.write_text(text, encoding="utf-8")
+
+        result = runner.invoke(main, ["dev", "lint", SAMPLE])
+        assert result.exit_code == 0, result.output
+        assert "Completion report" in result.output
+        assert "warning" in result.output.lower()
+
+
+def test_lint_ignores_empty_completion_report_on_non_done_ticket():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        runner.invoke(main, ["dev", "ticket", "new", SAMPLE, "Some ticket", "--no-edit"])
+        result = runner.invoke(main, ["dev", "lint", SAMPLE])
+        assert result.exit_code == 0, result.output
