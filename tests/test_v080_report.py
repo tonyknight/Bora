@@ -109,6 +109,37 @@ def _append_review_range(path: Path, start: str, end: str):
     path.write_text(text, encoding="utf-8")
 
 
+def test_report_build_not_confused_by_section_header_mentioned_in_prose(tmp_path):
+    """A Requirements document that *discusses* `## Non-goals` or
+    `## Testing requirements` in its own prose (before the real heading)
+    must not have that prose mistaken for the section — the same class of
+    false positive ticket 06 found and fixed for ticket bodies."""
+    root = _init_git_project(str(tmp_path))
+    reqs_dir = root / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor"
+    reqs_path = next(reqs_dir.glob("*Requirements.md"))
+    text = reqs_path.read_text(encoding="utf-8")
+    text = text.replace(
+        "## Overview",
+        "## Overview\n\nSee the `## Non-goals` section below and the "
+        "`## Testing requirements` section for the verify command.",
+    )
+    text = text.replace(
+        "## Non-goals\n\n## Architecture",
+        "## Non-goals\n\n- Deferred: real non-goal text\n\n## Architecture",
+    )
+    text = text.replace(
+        "## Testing requirements\n\nName the project verify command(s) here",
+        "## Testing requirements\n\nNamed command: **`pytest`**.\n\nOld text: Name the project verify command(s) here",
+    )
+    reqs_path.write_text(text, encoding="utf-8")
+
+    result = build_completion_report(root, SAMPLE)
+    text = result.path.read_text(encoding="utf-8")
+    assert "**`pytest`**" in text
+    assert "real non-goal text" in text
+    assert "Deferred: real non-goal text" in text
+
+
 def test_report_build_front_matter_and_header(tmp_path):
     root = _init_git_project(str(tmp_path))
     _write_requirements(root)

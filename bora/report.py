@@ -46,13 +46,21 @@ class ReportBuildResult:
 
 
 def _extract_section(text: str, header: str) -> Optional[str]:
-    idx = text.find(header)
-    if idx < 0:
+    """Return the body under an H2 ``header``, or None if absent.
+
+    Anchored to the start of a line (`re.escape(header)` at line start) so
+    prose that merely *mentions* the header text — e.g. a Requirements
+    document discussing "the `## Non-goals` section" before the real
+    heading, exactly the false positive ticket 06 found and fixed for
+    ticket bodies — is never mistaken for the actual section.
+    """
+    match = re.search(rf"^{re.escape(header)}[ \t]*$", text, re.MULTILINE)
+    if match is None:
         return None
-    rest = text[idx + len(header) :]
+    rest = text[match.end() :]
     nxt = _H2_RE.search(rest)
-    end = idx + len(header) + nxt.start() if nxt else len(text)
-    return text[idx + len(header) : end].strip()
+    end = match.end() + nxt.start() if nxt else len(text)
+    return text[match.end() : end].strip()
 
 
 def _slugify(project_path: str) -> str:
