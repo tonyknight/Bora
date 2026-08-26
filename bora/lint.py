@@ -7,8 +7,10 @@ they cause confusion.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from .paths import (
     REQUIRED_FIELDS,
@@ -35,6 +37,31 @@ class LintIssue:
         except ValueError:
             rel = self.path
         return f"  [{self.severity}] {rel}: {self.message}"
+
+
+COMPLETION_REPORT_HEADER = "## Completion report"
+_H2_RE = re.compile(r"^## ", re.MULTILINE)
+_COMPLETION_FIELD_RE = re.compile(
+    r"-\s*\*\*(Outcome|Files|Errors|Verify):\*\*\s*(.*)$", re.MULTILINE
+)
+
+
+def _completion_report_section(body: str) -> Optional[str]:
+    """Return the `## Completion report` section text, or None if absent."""
+    idx = body.find(COMPLETION_REPORT_HEADER)
+    if idx < 0:
+        return None
+    rest = body[idx + len(COMPLETION_REPORT_HEADER) :]
+    nxt = _H2_RE.search(rest)
+    end = idx + len(COMPLETION_REPORT_HEADER) + nxt.start() if nxt else len(body)
+    return body[idx:end]
+
+
+def _completion_report_is_filled(section: str) -> bool:
+    fields = dict(_COMPLETION_FIELD_RE.findall(section))
+    if len(fields) < 4:
+        return False
+    return all(value.strip() for value in fields.values())
 
 
 def lint_ticket(ticket: Ticket, known_ids: set[str]) -> list[LintIssue]:
@@ -79,6 +106,20 @@ def lint_ticket(ticket: Ticket, known_ids: set[str]) -> list[LintIssue]:
             p, "warning",
             "status is 'done' but closed date is empty"
         ))
+
+    # done tickets should have a filled Completion report (0.8.0)
+    if fm.get("status") == "done":
+        section = _completion_report_section(ticket.body)
+        if section is None:
+            issues.append(LintIssue(
+                p, "warning",
+                "status is 'done' but has no ## Completion report section (legacy ticket)"
+            ))
+        elif not _completion_report_is_filled(section):
+            issues.append(LintIssue(
+                p, "error",
+                "status is 'done' but ## Completion report is not filled in"
+            ))
 
     # Non-done tickets should not have a closed date
     if fm.get("status") and fm.get("status") != "done" and fm.get("closed"):

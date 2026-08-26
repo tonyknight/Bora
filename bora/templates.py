@@ -681,6 +681,13 @@ Detailed checklist. Major subtasks should also appear in the frontmatter
 Status: draft
 Current task:
 
+## Completion report
+
+- **Outcome:**
+- **Files:**
+- **Errors:**
+- **Verify:**
+
 ## Notes
 
 Append-only running log. Each entry dated.
