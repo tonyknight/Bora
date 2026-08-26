@@ -17,6 +17,7 @@ from .context import assemble_context, estimate_tokens
 from .create import create_ticket
 from .lint import lint_all
 from .probe import ProbeError, probe_models, strip_userinfo
+from .report import build_completion_report
 from .paths import (
     AGENTS_FILE,
     ProjectPathError,
@@ -1203,6 +1204,40 @@ def routing_sync(
         f"Sync: {resolved_count} resolved, {unresolved_count} unresolved, "
         f"{len(result.pinned)} pinned, {len(available)} available"
     )
+
+
+# =============================================================================
+# dev report
+# =============================================================================
+
+
+@dev.group()
+def report() -> None:
+    """Assemble a project's Completion document from ticket fragments."""
+
+
+@report.command("build")
+@click.argument("project_path")
+@click.option("--force", is_flag=True, help="Overwrite an existing Completion document.")
+def report_build(project_path: str, force: bool) -> None:
+    """Merge each ticket's `## Completion report` into the project's
+
+    (YYYY-MM-DD) {ProjectName} Completion.md, alongside the Requirements
+    file. Draft for a human to edit — without --force, an existing document
+    is never overwritten; a `.new` sibling is written instead.
+    """
+    root, project_path = _dev_project(project_path)
+    result = build_completion_report(root, project_path, force=force)
+    if result.written:
+        click.echo(f"Created {result.path.relative_to(root)}")
+    else:
+        click.echo(f"{result.path.relative_to(root)} already exists — not overwritten.")
+        click.echo(f"New draft written to {result.diff_path.relative_to(root)}")
+        if result.diff_text:
+            click.echo()
+            click.echo(result.diff_text)
+        click.echo()
+        click.echo("Review the diff above and merge by hand, or re-run with --force to overwrite.")
 
 
 # =============================================================================
