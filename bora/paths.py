@@ -82,6 +82,17 @@ def parse_project_path(raw: str) -> tuple[str, ...]:
         text = text[1:-1]
     if not text:
         raise ProjectPathError("project path is empty")
+
+    prefix_check = text
+    if prefix_check.startswith("./") or prefix_check.startswith(".\\"):
+        prefix_check = prefix_check[2:]
+    normalized_prefix = prefix_check.replace("\\", "/")
+    if normalized_prefix == "docs/ai" or normalized_prefix.startswith("docs/ai/"):
+        corrected = normalized_prefix[len("docs/ai/") :] if normalized_prefix != "docs/ai" else ""
+        raise ProjectPathError(
+            f'project_path is relative to docs/ai/. Did you mean "{corrected}"?'
+        )
+
     if text.startswith("/"):
         raise ProjectPathError("project path must not be absolute")
     if "//" in text:

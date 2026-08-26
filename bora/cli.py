@@ -56,12 +56,15 @@ from .templates import AGENTS_MD, REQUIREMENTS_MD_TEMPLATE, render_project_front
 from .ticket import find_ticket, load_all_tickets, parse_ticket
 from .routing import (
     MATCH_MATCHED,
+    VALID_TIERS,
+    ProjectRouting,
     RoutingConfigError,
     briefing_frontmatter,
     project_is_routing_opted_in,
     resolve_effective_routing,
     resolve_session,
     routing_cache_for_host,
+    write_routing_file,
 )
 
 
@@ -375,11 +378,25 @@ def dev_init(
     click.echo(f"Created {reqs.relative_to(root)}")
     click.echo(f"Created {status.relative_to(root)}")
     click.echo(f"Created {tickets.relative_to(root)}")
-    if routing_opt_in and not (root / ".bora" / "models.yaml").exists():
-        click.echo(
-            "Note: add .bora/models.yaml with ordered aliases per tier. "
-            "Session resolve will ask until that file exists."
+    if routing_opt_in:
+        stub = ProjectRouting(
+            version=1,
+            host=None,
+            synced=None,
+            source=None,
+            tiers={tier: None for tier in VALID_TIERS},
+            pinned=[],
+            available=[],
+            unmatched_aliases={},
         )
+        write_routing_file(root, path, stub)
+        routing_path = briefing.parent / "routing.yaml"
+        click.echo(f"Created {routing_path.relative_to(root)}")
+        if not (root / ".bora" / "models.yaml").exists():
+            click.echo(
+                "Note: add .bora/models.yaml with ordered aliases per tier. "
+                "Session resolve will ask until that file exists."
+            )
 
     click.echo("\nDev project scaffolded. Next steps:")
     click.echo(f"  1. Edit {briefing.relative_to(root)}")
