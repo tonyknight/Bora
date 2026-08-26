@@ -344,6 +344,7 @@ class TierMatch:
     candidates: list[str] = field(default_factory=list)
     suggest: Optional[str] = None
     alias: Optional[str] = None
+    stale_routing_slug: Optional[str] = None
 
 
 def _normalize_model_text(text: str) -> str:
@@ -417,14 +418,32 @@ def resolve_session(
     available: list[str],
     host: str,
     cache: Optional[dict] = None,
+    routing_yaml: Optional["ProjectRouting"] = None,
 ) -> dict[str, TierMatch]:
-    """Match each tier for ``host``. Cache for other hosts is ignored."""
+    """Match each tier for ``host``. Cache for other hosts is ignored.
+
+    Precedence (0.8.0, Requirements §11): a `routing.yaml` slug still present
+    in ``available`` wins outright, skipping catalog matching for that tier —
+    this covers both pinned and unpinned entries identically, since either
+    way it is the last known-good resolution for this host and re-deriving
+    it via fuzzy match every session is exactly what persisting it avoids.
+    A `routing.yaml` slug **absent** from ``available`` is stale: fall
+    through to catalog matching (then briefing ``cache``, then ask) and
+    record the stale slug on the result so a caller can suggest a re-sync.
+    """
     cache = cache or {}
     raw_host = cache.get(host) if isinstance(cache, dict) else None
     host_cache = raw_host if isinstance(raw_host, dict) else {}
     resolved: dict[str, TierMatch] = {}
     for tier, aliases in tiers.items():
+        routing_slug = routing_yaml.tiers.get(tier) if routing_yaml else None
+        if routing_slug and routing_slug in available:
+            resolved[tier] = TierMatch(status=MATCH_MATCHED, slug=routing_slug)
+            continue
         hint = host_cache.get(tier)
         cache_slug = hint if isinstance(hint, str) else None
-        resolved[tier] = match_tier(list(aliases), available, cache_slug=cache_slug)
+        match = match_tier(list(aliases), available, cache_slug=cache_slug)
+        if routing_slug:
+            match.stale_routing_slug = routing_slug
+        resolved[tier] = match
     return resolved

@@ -966,6 +966,22 @@ def routing_show(project_path: str) -> None:
             route = "(unset)"
         click.echo(f"{tier:<9}  {route}")
 
+    click.echo()
+    routing_yaml = load_routing_file(root, project_path)
+    if routing_yaml is None:
+        click.echo("Project routing file: none (run bora dev routing sync)")
+    else:
+        click.echo(
+            f"Project routing file: routing.yaml "
+            f"(synced {routing_yaml.synced}, host {routing_yaml.host}, "
+            f"{len(routing_yaml.available)} available)"
+        )
+        for tier in _ROUTING_TIER_ORDER:
+            value = routing_yaml.tiers.get(tier)
+            pin_mark = " [pinned]" if tier in routing_yaml.pinned else ""
+            shown = value if value else "(unresolved)"
+            click.echo(f"  {tier:<9} {shown}{pin_mark}")
+
 
 @routing.command("resolve")
 @click.argument("project_path")
@@ -1015,8 +1031,9 @@ def routing_resolve(project_path: str, host: str, available_path: str) -> None:
         if line.strip() and not line.strip().startswith("#")
     ]
     cache = routing_cache_for_host(briefing_frontmatter(root, project_path), host)
+    routing_yaml = load_routing_file(root, project_path)
     session = resolve_session(
-        resolved.tiers, available, host=host, cache={host: cache}
+        resolved.tiers, available, host=host, cache={host: cache}, routing_yaml=routing_yaml
     )
     click.echo(f"Bora routing resolve ({host})")
     click.echo()
@@ -1032,6 +1049,11 @@ def routing_resolve(project_path: str, host: str, available_path: str) -> None:
             click.echo(f"{tier:<9}  ASK (suggest: {match.suggest})")
         else:
             click.echo(f"{tier:<9}  ASK")
+        if match is not None and match.stale_routing_slug:
+            click.echo(
+                f"{'':<9}  stale: routing.yaml had '{match.stale_routing_slug}', "
+                "no longer available — suggest bora dev routing sync"
+            )
 
 
 @routing.command("sync")
