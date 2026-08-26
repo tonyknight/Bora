@@ -756,3 +756,76 @@ def test_lint_not_confused_by_completion_report_mentioned_in_prose():
 
         result = runner.invoke(main, ["dev", "lint", SAMPLE])
         assert result.exit_code == 0, result.output
+
+
+# --- Version, skills, README compatibility (ticket 08) ----------------------
+
+def test_version_constants_are_0_8_0():
+    import bora
+    from bora.profile import CURRENT_VERSION
+    from bora.templates import AGENTS_TEMPLATE_VERSION
+
+    assert bora.__version__ == "0.8.0"
+    assert CURRENT_VERSION == "0.8.0"
+    assert AGENTS_TEMPLATE_VERSION == "0.8.0"
+
+
+def test_pyproject_version_is_0_8_0():
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    text = pyproject.read_text(encoding="utf-8")
+    assert 'version = "0.8.0"' in text
+
+
+def test_bora_and_execute_skills_describe_sync_and_routing_yaml():
+    from bora.skill_pack import render_pack_skill
+
+    bora_skill = render_pack_skill("bora").lower()
+    execute_skill = render_pack_skill("bora-execute").lower()
+    for text in (bora_skill, execute_skill):
+        assert "routing sync" in text
+        assert "routing.yaml" in text
+        assert "does not choose models" in text
+
+
+def test_bora_and_execute_skills_have_no_vendor_names():
+    from bora.skill_pack import render_pack_skill
+
+    forbidden = ("claude-sonnet", "gemini-flash", "gpt-4", "openai/", "anthropic/")
+    for name in ("bora", "bora-execute"):
+        text = render_pack_skill(name).lower()
+        for fragment in forbidden:
+            assert fragment not in text, (name, fragment)
+
+
+def test_review_skill_instructs_filling_completion_report():
+    from bora.skill_pack import render_pack_skill
+
+    text = render_pack_skill("bora-review").lower()
+    assert "## completion report" in text
+
+
+def test_finish_skill_runs_report_build():
+    from bora.skill_pack import render_pack_skill
+
+    text = render_pack_skill("bora-finish").lower()
+    assert "report build" in text
+
+
+def test_upgrade_preserves_existing_routing_cache():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--routing"])
+        briefing = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / f"(2026-08-25) Gallery Refactor.md"
+        text = briefing.read_text(encoding="utf-8")
+        text = text.replace(
+            "routing: true\n",
+            "routing: true\nrouting_cache:\n  claude:\n    premium: claude-opus-4-6\n",
+            1,
+        )
+        briefing.write_text(text, encoding="utf-8")
+
+        result = runner.invoke(main, ["dev", "upgrade"])
+        assert result.exit_code == 0, result.output
+        after = briefing.read_text(encoding="utf-8")
+        assert "routing_cache" in after
+        assert "claude-opus-4-6" in after
