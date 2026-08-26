@@ -280,6 +280,31 @@ def test_report_build_backlog_from_non_goals_and_blocked_tickets(tmp_path):
     assert "Blocked ticket" in text
 
 
+def test_report_build_finds_numbered_section_headings(tmp_path):
+    """A hand-authored Requirements doc commonly numbers its sections
+    (`## 4. Non-goals`) rather than using the scaffold's bare heading —
+    found live while running report build against Bora's own real 0.8.0
+    Requirements document during bora-finish."""
+    root = _init_git_project(str(tmp_path))
+    reqs_dir = root / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor"
+    reqs_path = next(reqs_dir.glob("*Requirements.md"))
+    text = reqs_path.read_text(encoding="utf-8")
+    text = text.replace(
+        "## Non-goals\n\n## Architecture",
+        "## 4. Non-goals\n\n- Deferred: numbered heading non-goal\n\n## 5. Architecture",
+    )
+    text = text.replace(
+        "## Testing requirements\n\nName the project verify command(s) here",
+        "## 6. Testing requirements\n\nNamed command: **`pytest`**.\n\nOld text: Name the project verify command(s) here",
+    )
+    reqs_path.write_text(text, encoding="utf-8")
+
+    result = build_completion_report(root, SAMPLE)
+    text = result.path.read_text(encoding="utf-8")
+    assert "**`pytest`**" in text
+    assert "numbered heading non-goal" in text
+
+
 def test_report_build_non_destructive_without_force(tmp_path):
     root = _init_git_project(str(tmp_path))
     _write_requirements(root)

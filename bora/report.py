@@ -48,13 +48,20 @@ class ReportBuildResult:
 def _extract_section(text: str, header: str) -> Optional[str]:
     """Return the body under an H2 ``header``, or None if absent.
 
-    Anchored to the start of a line (`re.escape(header)` at line start) so
-    prose that merely *mentions* the header text — e.g. a Requirements
-    document discussing "the `## Non-goals` section" before the real
-    heading, exactly the false positive ticket 06 found and fixed for
-    ticket bodies — is never mistaken for the actual section.
+    ``header`` is the scaffold's bare form, e.g. ``"## Non-goals"``. A
+    hand-authored Requirements document commonly numbers its sections
+    (``"## 4. Non-goals"``) — an optional ``N. `` prefix between ``## `` and
+    the title is accepted so both forms match the same section.
+
+    Anchored to the start of a line so prose that merely *mentions* the
+    header text — e.g. a Requirements document discussing "the
+    `## Non-goals` section" before the real heading, exactly the false
+    positive ticket 06 found and fixed for ticket bodies — is never mistaken
+    for the actual section.
     """
-    match = re.search(rf"^{re.escape(header)}[ \t]*$", text, re.MULTILINE)
+    prefix, _, title = header.partition("## ")
+    pattern = rf"^{re.escape(prefix)}## (?:\d+\.\s+)?{re.escape(title)}[ \t]*$"
+    match = re.search(pattern, text, re.MULTILINE)
     if match is None:
         return None
     rest = text[match.end() :]
