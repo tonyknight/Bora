@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -60,6 +60,8 @@ from .routing import (
     ProjectRouting,
     RoutingConfigError,
     briefing_frontmatter,
+    load_routing_file,
+    match_tier,
     project_is_routing_opted_in,
     resolve_effective_routing,
     resolve_session,
@@ -1029,6 +1031,111 @@ def routing_resolve(project_path: str, host: str, available_path: str) -> None:
             click.echo(f"{tier:<9}  ASK (suggest: {match.suggest})")
         else:
             click.echo(f"{tier:<9}  ASK")
+
+
+@routing.command("sync")
+@click.argument("project_path")
+@click.option(
+    "--host",
+    type=click.Choice(["claude", "cursor", "opencode"]),
+    required=True,
+    help="Current agent host.",
+)
+@click.option(
+    "--available",
+    "available_path",
+    required=True,
+    type=click.Path(),
+    help="Text file of model ids/names this host can run, one per line.",
+)
+@click.option("--repin", is_flag=True, help="Discard existing pins and recompute every tier.")
+@click.option("--dry-run", is_flag=True, help="Print the summary; write nothing.")
+def routing_sync(
+    project_path: str,
+    host: str,
+    available_path: str,
+    repin: bool,
+    dry_run: bool,
+) -> None:
+    """Match catalog aliases to an injected available-model list and write routing.yaml.
+
+    Unmatched tiers are written with the full available inventory instead of
+    prompting. No network I/O.
+    """
+    root, project_path = _dev_project(project_path)
+    available_file = Path(available_path)
+    if not available_file.is_file():
+        click.echo(f"Error: available-models file not found: {available_path}", err=True)
+        sys.exit(1)
+
+    try:
+        resolved = resolve_effective_routing(root)
+    except RoutingConfigError as exc:
+        click.echo(f"Configuration error: {exc}", err=True)
+        sys.exit(1)
+
+    if not resolved.enabled:
+        click.echo("Error: routing catalog is disabled or missing.", err=True)
+        sys.exit(1)
+    if not project_is_routing_opted_in(root, project_path):
+        click.echo(
+            "Error: project is not opted in (set briefing routing: true).",
+            err=True,
+        )
+        sys.exit(1)
+
+    available = [
+        line.strip()
+        for line in available_file.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+    tiers: dict[str, Optional[str]] = {}
+    unmatched_aliases: dict[str, list[str]] = {}
+    for tier in VALID_TIERS:
+        aliases = resolved.tiers.get(tier) or []
+        if not aliases:
+            tiers[tier] = None
+            continue
+        match = match_tier(aliases, available)
+        if match.status == MATCH_MATCHED:
+            tiers[tier] = match.slug
+        else:
+            tiers[tier] = None
+            unmatched_aliases[tier] = list(aliases)
+
+    existing = load_routing_file(root, project_path)
+    existing_pinned = existing.pinned if existing else []
+    if repin and existing_pinned:
+        click.echo(f"Discarding {len(existing_pinned)} pin(s): {', '.join(sorted(existing_pinned))}")
+
+    incoming = ProjectRouting(
+        version=1,
+        host=host,
+        synced=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        source="injected",
+        tiers=tiers,
+        pinned=[],
+        available=available,
+        unmatched_aliases=unmatched_aliases,
+    )
+
+    # Pin status is only known once merged against what's on disk — the
+    # result of this single call (real or dry-run) is what warnings and
+    # counts report, not a stale pre-read from before the merge.
+    result = write_routing_file(root, project_path, incoming, repin=repin, dry_run=dry_run)
+
+    for tier in result.pinned:
+        slug = result.tiers.get(tier)
+        if slug and slug not in available:
+            click.echo(f"Warning: pinned tier '{tier}' slug '{slug}' is no longer available.")
+
+    resolved_count = sum(1 for v in result.tiers.values() if v is not None)
+    unresolved_count = sum(1 for v in result.tiers.values() if v is None)
+    click.echo(
+        f"Sync: {resolved_count} resolved, {unresolved_count} unresolved, "
+        f"{len(result.pinned)} pinned, {len(available)} available"
+    )
 
 
 # =============================================================================

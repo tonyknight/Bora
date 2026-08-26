@@ -232,6 +232,7 @@ def write_routing_file(
     routing: "ProjectRouting",
     *,
     repin: bool = False,
+    dry_run: bool = False,
 ) -> ProjectRouting:
     """Write `routing.yaml`, preserving hand-edited (pinned) tier values.
 
@@ -240,6 +241,12 @@ def write_routing_file(
     edited it since the last write. Pinned tiers are kept as-is and added to
     ``pinned`` unless ``repin`` discards every existing pin and writes the
     incoming values verbatim.
+
+    ``dry_run`` computes and returns the merged result — including which
+    tiers would be pinned or preserved by this write — without touching
+    disk. Callers that need to report on a pending write (warnings, summary
+    counts) should always call this rather than inspecting the file as it
+    stood *before* the call, since pin status is only known once merged.
     """
     path = _routing_yaml_path(root, project_path)
     existing = None if repin else load_routing_file(root, project_path)
@@ -268,6 +275,9 @@ def write_routing_file(
         available=list(routing.available),
         unmatched_aliases=dict(routing.unmatched_aliases),
     )
+
+    if dry_run:
+        return result
 
     path.parent.mkdir(parents=True, exist_ok=True)
     doc = {
