@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,21 @@ from bora.routing import (
     load_routing_file,
     write_routing_file,
 )
+
+
+def _guarded_connect(*_a, **_kw):
+    raise AssertionError(
+        "network I/O attempted in tests/test_v080.py — this module covers "
+        "routing.yaml, init, and routing sync --available, none of which "
+        "should ever open a socket"
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_sockets(monkeypatch):
+    """Every test in this file must stay offline (ticket 04, Requirements §10)."""
+    monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
+    yield
 
 
 def _init_project(root: Path, project_path: str = "Codebase/Target/Proj") -> Path:
