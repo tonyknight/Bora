@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import socket
 from datetime import date
@@ -22,6 +23,16 @@ def _guarded_connect(*_a, **_kw):
 def _no_sockets(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _restore_cwd():
+    """`_init_git_project` chdirs into a temp root for CliRunner calls that
+    resolve `Path.cwd()` themselves (dev init, ticket new); restore the real
+    cwd after each test so this never leaks into other test files."""
+    original = os.getcwd()
+    yield
+    os.chdir(original)
 
 
 SAMPLE = "QromaCore/Hamburg/Gallery Refactor"
@@ -45,6 +56,7 @@ def _commit_file(root: Path, relpath: str, content: str, message: str) -> str:
 
 def _init_git_project(td: str) -> Path:
     root = Path(td)
+    os.chdir(root)
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "test@example.com")
     _git(root, "config", "user.name", "Test")

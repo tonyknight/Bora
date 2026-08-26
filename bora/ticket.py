@@ -33,6 +33,41 @@ class Subtask:
     status: str = "todo"
 
 
+COMPLETION_REPORT_HEADER = "## Completion report"
+_H2_RE = re.compile(r"^## ", re.MULTILINE)
+# Anchored to the start of a line so prose that merely *mentions*
+# "## Completion report" (e.g. in backticks, describing this very feature)
+# is never mistaken for the actual heading.
+_COMPLETION_HEADER_RE = re.compile(r"^## Completion report[ \t]*$", re.MULTILINE)
+_COMPLETION_FIELD_RE = re.compile(
+    r"-\s*\*\*(Outcome|Files|Errors|Verify):\*\*\s*(.*)$", re.MULTILINE
+)
+
+
+def extract_completion_report_section(body: str) -> Optional[str]:
+    """Return a ticket's `## Completion report` section text, or None if absent."""
+    match = _COMPLETION_HEADER_RE.search(body)
+    if match is None:
+        return None
+    idx = match.start()
+    rest = body[match.end() :]
+    nxt = _H2_RE.search(rest)
+    end = match.end() + nxt.start() if nxt else len(body)
+    return body[idx:end]
+
+
+def completion_report_fields(section: str) -> dict[str, str]:
+    """Return {Outcome, Files, Errors, Verify} -> text (possibly empty)."""
+    return dict(_COMPLETION_FIELD_RE.findall(section))
+
+
+def completion_report_is_filled(section: str) -> bool:
+    fields = completion_report_fields(section)
+    if len(fields) < 4:
+        return False
+    return all(value.strip() for value in fields.values())
+
+
 @dataclass
 class Ticket:
     """In-memory representation of a ticket file."""

@@ -7,10 +7,8 @@ they cause confusion.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from .paths import (
     REQUIRED_FIELDS,
@@ -20,7 +18,13 @@ from .paths import (
     VALID_TYPES,
 )
 from .plan import VALID_PLAN_STATUSES, extract_plan_section, parse_plan_tasks
-from .ticket import Ticket, load_all_tickets, parse_ticket
+from .ticket import (
+    Ticket,
+    completion_report_is_filled,
+    extract_completion_report_section,
+    load_all_tickets,
+    parse_ticket,
+)
 
 
 @dataclass
@@ -37,36 +41,6 @@ class LintIssue:
         except ValueError:
             rel = self.path
         return f"  [{self.severity}] {rel}: {self.message}"
-
-
-COMPLETION_REPORT_HEADER = "## Completion report"
-_H2_RE = re.compile(r"^## ", re.MULTILINE)
-# Anchored to the start of a line so prose that merely *mentions*
-# "## Completion report" (e.g. in backticks, describing this very feature)
-# is never mistaken for the actual heading.
-_COMPLETION_HEADER_RE = re.compile(r"^## Completion report[ \t]*$", re.MULTILINE)
-_COMPLETION_FIELD_RE = re.compile(
-    r"-\s*\*\*(Outcome|Files|Errors|Verify):\*\*\s*(.*)$", re.MULTILINE
-)
-
-
-def _completion_report_section(body: str) -> Optional[str]:
-    """Return the `## Completion report` section text, or None if absent."""
-    match = _COMPLETION_HEADER_RE.search(body)
-    if match is None:
-        return None
-    idx = match.start()
-    rest = body[match.end() :]
-    nxt = _H2_RE.search(rest)
-    end = match.end() + nxt.start() if nxt else len(body)
-    return body[idx:end]
-
-
-def _completion_report_is_filled(section: str) -> bool:
-    fields = dict(_COMPLETION_FIELD_RE.findall(section))
-    if len(fields) < 4:
-        return False
-    return all(value.strip() for value in fields.values())
 
 
 def lint_ticket(ticket: Ticket, known_ids: set[str]) -> list[LintIssue]:
@@ -114,13 +88,13 @@ def lint_ticket(ticket: Ticket, known_ids: set[str]) -> list[LintIssue]:
 
     # done tickets should have a filled Completion report (0.8.0)
     if fm.get("status") == "done":
-        section = _completion_report_section(ticket.body)
+        section = extract_completion_report_section(ticket.body)
         if section is None:
             issues.append(LintIssue(
                 p, "warning",
                 "status is 'done' but has no ## Completion report section (legacy ticket)"
             ))
-        elif not _completion_report_is_filled(section):
+        elif not completion_report_is_filled(section):
             issues.append(LintIssue(
                 p, "error",
                 "status is 'done' but ## Completion report is not filled in"
