@@ -1220,11 +1220,12 @@ def report() -> None:
 @click.argument("project_path")
 @click.option("--force", is_flag=True, help="Overwrite an existing Completion document.")
 def report_build(project_path: str, force: bool) -> None:
-    """Merge each ticket's `## Completion report` into the project's
+    """Merge each ticket's `## Completion report` into the project's Completion.md.
 
-    (YYYY-MM-DD) {ProjectName} Completion.md, alongside the Requirements
-    file. Draft for a human to edit — without --force, an existing document
-    is never overwritten; a `.new` sibling is written instead.
+    Written as (YYYY-MM-DD) {ProjectName} Completion.md, alongside the
+    Requirements file. Draft for a human to edit — without --force, an
+    existing document is never overwritten; a `.new` sibling is written
+    instead.
     """
     root, project_path = _dev_project(project_path)
     result = build_completion_report(root, project_path, force=force)
