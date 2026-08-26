@@ -241,9 +241,9 @@ def test_routing_show_makes_no_network_calls(monkeypatch):
 
 
 def test_version_is_070():
-    assert __version__ == "0.7.5"
-    assert AGENTS_TEMPLATE_VERSION == "0.7.5"
-    assert CURRENT_VERSION == "0.7.5"
+    assert __version__ == "0.8.0"
+    assert AGENTS_TEMPLATE_VERSION == "0.8.0"
+    assert CURRENT_VERSION == "0.8.0"
 
 
 def test_init_does_not_create_models_yaml():

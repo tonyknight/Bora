@@ -447,9 +447,9 @@ def test_version_is_075():
     from bora.profile import CURRENT_VERSION
     from bora.templates import AGENTS_TEMPLATE_VERSION
 
-    assert __version__ == "0.7.5"
-    assert CURRENT_VERSION == "0.7.5"
-    assert AGENTS_TEMPLATE_VERSION == "0.7.5"
+    assert __version__ == "0.8.0"
+    assert CURRENT_VERSION == "0.8.0"
+    assert AGENTS_TEMPLATE_VERSION == "0.8.0"
 
 
 def test_bora_and_execute_document_session_resolve():
