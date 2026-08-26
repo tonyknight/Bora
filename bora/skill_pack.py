@@ -104,18 +104,29 @@ See `AGENTS.md` for full command surface and frontmatter reference.
 ## Session routing (opt-in)
 
 If the current project's briefing has `routing: true` and the repo
-catalog (`.bora/models.yaml`) is enabled, resolve **this session**
-before spawning subagents:
+catalog (`.bora/models.yaml`) is enabled, sync and resolve **this
+session** before spawning subagents:
 
 1. Collect the model ids this host can actually run (from the harness,
-   not from the `bora` CLI).
-2. Write them to a temp file, one per line, then run
-   `bora dev routing resolve <project_path> --host <cursor|claude|opencode> --available <file>`.
-3. If a tier result is ASK, ask the human. Do not invent a model id.
+   not from the `bora` CLI), or use `--probe <url>` for an endpoint
+   that exposes its own model list (the only network I/O in Bora, and
+   only when you pass this flag).
+2. Write available ids to a temp file, one per line, then run
+   `bora dev routing sync <project_path> --host <cursor|claude|opencode> (--available <file> | --probe <url>)`.
+   This writes the project's `routing.yaml`: resolved tiers plus every
+   model the host offered. A tier that fails to match becomes an
+   editable entry in that file instead of a question asked every
+   session.
+3. Read resolved slugs from `bora dev routing show <project_path>`
+   (or `routing.yaml` directly; `routing resolve` still works as a
+   read-only check). A tier left unresolved: ask the human, or leave
+   it advisory for this session — do not invent a model id.
 4. Pass matched host slugs into subagent starts when the host API
    accepts a model id.
-5. After unique matches, update briefing `routing_cache` for this host.
-   Cache is a hint only; resolve again next session.
+5. `routing.yaml` persists; re-run `sync` when the host's available
+   models change. Hand-edited tier values are pinned and survive a
+   re-sync. Briefing `routing_cache` is 0.7.5 compatibility — read
+   only, never hand-edited.
 """
 
 BORA_PLAN_SKILL_MD = """---
@@ -175,10 +186,13 @@ at a time.
 1. Load **`bora-worktree`** (consent once; record `origin_branch` on
    the briefing frontmatter).
 2. If the briefing has `routing: true` and the repo catalog is enabled,
-   resolve this session (`bora dev routing resolve` with an injected
-   available-model list). ASK means ask the human. Pass slugs to
-   subagents when the host supports it. Update `routing_cache` after
-   unique matches; it is a hint only.
+   sync this session (`bora dev routing sync` with an injected
+   available-model list, or `--probe <url>`) — this writes
+   `routing.yaml`, resolved tiers plus the full available inventory.
+   Read resolved slugs from it. A tier left unresolved: ask the human,
+   or leave it advisory for this session. Pass slugs to subagents when
+   the host supports it. Do not hand-edit briefing `routing_cache`
+   (0.7.5 compatibility, read-only).
 
 ## Per ticket
 
@@ -321,6 +335,10 @@ diff. Otherwise review in-session; still do not skip.
 Append a short `## Review` subsection on the ticket (date, verdict,
 findings). No `reviews/` folder.
 
+Before marking `done`, fill the ticket's `## Completion report`
+(Outcome / Files / Errors / Verify) — `bora dev report build` reads it
+later to assemble the project's Completion document.
+
 Human pasted review comments: read the diff, fix Critical/Important.
 """
 
@@ -382,7 +400,11 @@ description: Use when a bora project has no remaining unblocked tickets (all don
 # bora-finish
 
 1. Run **`bora-verify`** on the project suite. Failures: no menu.
-2. Read `origin_branch` from the briefing (set by `bora-worktree`).
+2. Run `bora dev report build <project_path>`. Complete the generated
+   testing-guide prose and any "(not recorded)" fields the ticket
+   fragments left blank. Required before the menu below — not
+   optional polish.
+3. Read `origin_branch` from the briefing (set by `bora-worktree`).
    Do not default to `main`. Ask if missing or ambiguous.
 
 ```

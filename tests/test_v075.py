@@ -453,16 +453,21 @@ def test_version_is_075():
 
 
 def test_bora_and_execute_document_session_resolve():
+    """0.8.0 update: session routing is documented as sync-then-resolve
+    (`bora dev routing sync` writes `routing.yaml`); `bora-execute`'s
+    condensed on-start step no longer names the standalone read-only
+    `routing resolve` command, though `bora`'s fuller explanation still
+    does — see tests/test_v080.py for the 0.8.0-specific assertions."""
     from bora.skill_pack import render_pack_skill
 
     bora = render_pack_skill("bora").lower()
     execute = render_pack_skill("bora-execute").lower()
     for text in (bora, execute):
         assert "routing: true" in text
-        assert "routing resolve" in text
         assert "ask" in text
         assert "routing_cache" in text
         assert "does not choose models" in text
+    assert "routing resolve" in bora
 
 
 def test_upgrade_does_not_add_routing_opt_in():
