@@ -516,3 +516,126 @@ def test_sync_missing_available_file_is_usage_error():
             ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(Path(td) / "nope.txt")],
         )
         assert result.exit_code != 0
+
+
+# --- Session resolve precedence + routing show (ticket 05) ------------------
+
+from bora.routing import MATCH_MATCHED, resolve_session
+
+
+def test_resolve_session_prefers_routing_yaml_over_catalog_match():
+    routing_yaml = ProjectRouting(
+        version=1, host="claude", synced="t1", source="injected",
+        tiers={"premium": "hand-picked-model", "standard": None, "economy": None, "local": None},
+        pinned=["premium"], available=["claude-opus-4-6"], unmatched_aliases={},
+    )
+    tiers = {"premium": ["opus"]}
+    available = ["claude-opus-4-6", "hand-picked-model"]
+    session = resolve_session(tiers, available, host="claude", routing_yaml=routing_yaml)
+    assert session["premium"].status == MATCH_MATCHED
+    assert session["premium"].slug == "hand-picked-model"
+
+
+def test_resolve_session_unpinned_routing_yaml_entry_also_wins():
+    routing_yaml = ProjectRouting(
+        version=1, host="claude", synced="t1", source="injected",
+        tiers={"premium": "claude-opus-4-6", "standard": None, "economy": None, "local": None},
+        pinned=[], available=["claude-opus-4-6"], unmatched_aliases={},
+    )
+    tiers = {"premium": ["opus"]}
+    available = ["claude-opus-4-6"]
+    session = resolve_session(tiers, available, host="claude", routing_yaml=routing_yaml)
+    assert session["premium"].status == MATCH_MATCHED
+    assert session["premium"].slug == "claude-opus-4-6"
+
+
+def test_resolve_session_stale_routing_yaml_slug_falls_back_to_catalog():
+    routing_yaml = ProjectRouting(
+        version=1, host="claude", synced="t1", source="injected",
+        tiers={"premium": "vanished-model", "standard": None, "economy": None, "local": None},
+        pinned=["premium"], available=[], unmatched_aliases={},
+    )
+    tiers = {"premium": ["opus"]}
+    available = ["claude-opus-4-6"]
+    session = resolve_session(tiers, available, host="claude", routing_yaml=routing_yaml)
+    assert session["premium"].status == MATCH_MATCHED
+    assert session["premium"].slug == "claude-opus-4-6"
+    assert session["premium"].stale_routing_slug == "vanished-model"
+
+
+def test_resolve_session_no_routing_yaml_unchanged_075_behavior():
+    tiers = {"premium": ["opus"]}
+    available = ["claude-opus-4-6"]
+    session = resolve_session(tiers, available, host="claude", routing_yaml=None)
+    assert session["premium"].status == MATCH_MATCHED
+    assert session["premium"].slug == "claude-opus-4-6"
+    assert session["premium"].stale_routing_slug is None
+
+
+def test_resolve_session_cursor_cache_still_ignored_for_claude_host():
+    tiers = {"premium": ["opus"]}
+    available = ["claude-opus-4-6", "claude-opus-4-5"]
+    cache = {"cursor": {"premium": "grok-4-6"}}
+    session = resolve_session(tiers, available, host="claude", cache=cache, routing_yaml=None)
+    # "opus" is ambiguous between the two claude-opus models; cursor's cache
+    # must not leak into a claude-host suggestion.
+    assert session["premium"].suggest is None
+
+
+def test_routing_resolve_cli_uses_routing_yaml_and_reports_stale():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        routing_path = _init_synced_project(runner, td)
+        available1 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6"])
+        runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available1)],
+        )
+        text = routing_path.read_text(encoding="utf-8")
+        text = text.replace("claude-opus-4-6", "vanished-model", 1)
+        routing_path.write_text(text, encoding="utf-8")
+
+        available2 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "resolve", SAMPLE, "--host", "claude", "--available", str(available2)],
+        )
+        assert result.exit_code == 0, result.output
+        assert "vanished-model" in result.output
+        assert "claude-opus-4-6" in result.output
+        # Read-only: routing.yaml on disk is untouched by resolve.
+        assert "vanished-model" in routing_path.read_text(encoding="utf-8")
+
+
+def test_routing_show_reports_no_routing_file():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        result = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert result.exit_code == 0, result.output
+        assert "Project routing file: none" in result.output
+
+
+def test_routing_show_reports_synced_routing_file_with_pinned_marker():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        routing_path = _init_synced_project(runner, td)
+        available1 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6"])
+        runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available1)],
+        )
+        text = routing_path.read_text(encoding="utf-8")
+        text = text.replace("claude-opus-4-6", "hand-picked-model", 1)
+        routing_path.write_text(text, encoding="utf-8")
+        available2 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6", "hand-picked-model"])
+        runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available2)],
+        )
+
+        result = runner.invoke(main, ["dev", "routing", "show", SAMPLE])
+        assert result.exit_code == 0, result.output
+        assert "Project routing file:" in result.output
+        assert "hand-picked-model" in result.output
+        assert "[pinned]" in result.output
