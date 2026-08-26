@@ -179,3 +179,101 @@ def test_repin_clears_pins_and_recomputes(tmp_path):
 
     assert result.tiers["premium"] == "claude-opus-4-6"
     assert result.pinned == []
+
+
+# --- Init stub + docs/ai/ path rejection (ticket 02) -----------------------
+
+from click.testing import CliRunner
+
+from bora.cli import main
+
+SAMPLE = "QromaCore/Hamburg/Gallery Refactor"
+
+
+def _runner():
+    return CliRunner()
+
+
+def test_init_docs_ai_prefix_rejected_names_corrected_path():
+    runner = _runner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", "docs/ai/Bora/v0.8.0"])
+        assert result.exit_code != 0
+        assert "Bora/v0.8.0" in result.output
+
+
+def test_init_dot_slash_docs_ai_prefix_rejected():
+    runner = _runner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", "./docs/ai/Bora/v0.8.0"])
+        assert result.exit_code != 0
+        assert "Bora/v0.8.0" in result.output
+
+
+def test_init_backslash_docs_ai_prefix_rejected():
+    runner = _runner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", "docs\\ai\\Bora\\v0.8.0"])
+        assert result.exit_code != 0
+        assert "Bora/v0.8.0" in result.output
+
+
+def test_status_rejects_docs_ai_prefix():
+    runner = _runner()
+    with runner.isolated_filesystem():
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        result = runner.invoke(main, ["dev", "status", "docs/ai/Bora/v0.8.0"])
+        assert result.exit_code != 0
+        assert "Bora/v0.8.0" in result.output
+
+
+def test_lint_rejects_docs_ai_prefix():
+    runner = _runner()
+    with runner.isolated_filesystem():
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        result = runner.invoke(main, ["dev", "lint", "docs/ai/Bora/v0.8.0"])
+        assert result.exit_code != 0
+        assert "Bora/v0.8.0" in result.output
+
+
+def test_normal_path_unaffected_by_prefix_rejection():
+    runner = _runner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        assert result.exit_code == 0, result.output
+
+
+def test_init_routing_writes_stub_routing_yaml():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        result = runner.invoke(main, ["dev", "init", SAMPLE, "--routing"])
+        assert result.exit_code == 0, result.output
+        stub = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "routing.yaml"
+        assert stub.exists()
+        text = stub.read_text(encoding="utf-8")
+        assert "version: 1" in text
+        assert "bora dev routing sync" in text
+        for tier in ("premium", "standard", "economy", "local"):
+            assert f"{tier}: null" in text or f"{tier}:\n" in text
+        assert "available: []" in text
+        assert "Created" in result.output
+        assert "routing.yaml" in result.output
+
+
+def test_init_no_routing_writes_no_stub():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        result = runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        assert result.exit_code == 0, result.output
+        stub = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "routing.yaml"
+        assert not stub.exists()
+
+
+def test_init_missing_catalog_still_writes_stub_and_note():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        result = runner.invoke(main, ["dev", "init", SAMPLE, "--routing"])
+        assert result.exit_code == 0, result.output
+        stub = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "routing.yaml"
+        assert stub.exists()
+        assert ".bora/models.yaml" in result.output
