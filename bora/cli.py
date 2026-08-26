@@ -16,6 +16,7 @@ from . import __version__
 from .context import assemble_context, estimate_tokens
 from .create import create_ticket
 from .lint import lint_all
+from .probe import ProbeError, probe_models, strip_userinfo
 from .paths import (
     AGENTS_FILE,
     ProjectPathError,
@@ -1037,36 +1038,62 @@ def routing_resolve(project_path: str, host: str, available_path: str) -> None:
 @click.argument("project_path")
 @click.option(
     "--host",
-    type=click.Choice(["claude", "cursor", "opencode"]),
     required=True,
-    help="Current agent host.",
+    help="Host label. cursor/claude/opencode for --available; free-form for --probe.",
 )
 @click.option(
     "--available",
     "available_path",
-    required=True,
+    default=None,
     type=click.Path(),
     help="Text file of model ids/names this host can run, one per line.",
+)
+@click.option(
+    "--probe",
+    "probe_url",
+    default=None,
+    help="Base URL of an OpenAI-compatible or Ollama endpoint to enumerate. The only network I/O in Bora.",
+)
+@click.option(
+    "--probe-key-env",
+    "probe_key_env",
+    default=None,
+    help="Environment variable holding a bearer credential for --probe.",
 )
 @click.option("--repin", is_flag=True, help="Discard existing pins and recompute every tier.")
 @click.option("--dry-run", is_flag=True, help="Print the summary; write nothing.")
 def routing_sync(
     project_path: str,
     host: str,
-    available_path: str,
+    available_path: Optional[str],
+    probe_url: Optional[str],
+    probe_key_env: Optional[str],
     repin: bool,
     dry_run: bool,
 ) -> None:
-    """Match catalog aliases to an injected available-model list and write routing.yaml.
+    """Match catalog aliases to an available-model list and write routing.yaml.
 
-    Unmatched tiers are written with the full available inventory instead of
-    prompting. No network I/O.
+    The list comes from --available (agent-injected, offline) or --probe (the
+    only network I/O anywhere in Bora, opt-in per invocation). Unmatched
+    tiers are written with the full available inventory instead of prompting.
     """
-    root, project_path = _dev_project(project_path)
-    available_file = Path(available_path)
-    if not available_file.is_file():
-        click.echo(f"Error: available-models file not found: {available_path}", err=True)
+    if bool(available_path) == bool(probe_url):
+        click.echo("Error: pass exactly one of --available or --probe.", err=True)
         sys.exit(1)
+
+    root, project_path = _dev_project(project_path)
+
+    if available_path:
+        if host not in {"claude", "cursor", "opencode"}:
+            click.echo(
+                "Error: --host must be one of claude, cursor, opencode when using --available.",
+                err=True,
+            )
+            sys.exit(1)
+        available_file = Path(available_path)
+        if not available_file.is_file():
+            click.echo(f"Error: available-models file not found: {available_path}", err=True)
+            sys.exit(1)
 
     try:
         resolved = resolve_effective_routing(root)
@@ -1084,11 +1111,29 @@ def routing_sync(
         )
         sys.exit(1)
 
-    available = [
-        line.strip()
-        for line in available_file.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    if available_path:
+        available = [
+            line.strip()
+            for line in Path(available_path).read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        source = "injected"
+    else:
+        token = None
+        if probe_key_env:
+            token = os.environ.get(probe_key_env)
+            if not token:
+                click.echo(
+                    f"Error: environment variable '{probe_key_env}' is not set.",
+                    err=True,
+                )
+                sys.exit(1)
+        try:
+            available = probe_models(probe_url, token=token)
+        except ProbeError as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(1)
+        source = f"probe:{strip_userinfo(probe_url)}"
 
     tiers: dict[str, Optional[str]] = {}
     unmatched_aliases: dict[str, list[str]] = {}
@@ -1113,7 +1158,7 @@ def routing_sync(
         version=1,
         host=host,
         synced=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        source="injected",
+        source=source,
         tiers=tiers,
         pinned=[],
         available=available,
