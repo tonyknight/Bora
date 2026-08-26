@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from bora.routing import (
     ProjectRouting,
@@ -277,3 +278,225 @@ def test_init_missing_catalog_still_writes_stub_and_note():
         stub = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "routing.yaml"
         assert stub.exists()
         assert ".bora/models.yaml" in result.output
+
+
+# --- routing sync --available (ticket 03) -----------------------------------
+
+def _write_models_yaml_v080(root: Path, text: str) -> Path:
+    path = root / ".bora" / "models.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+CATALOG_YAML = """\
+routing:
+  enabled: true
+  tiers:
+    premium:
+      - opus
+      - grok latest high
+    standard:
+      - sonnet
+    economy:
+      - glm latest
+      - haiku
+      - gpt-5-nano
+    local:
+      - ollama
+"""
+
+
+def _init_synced_project(runner, td):
+    runner.invoke(main, ["dev", "init", SAMPLE, "--routing"])
+    _write_models_yaml_v080(Path(td), CATALOG_YAML)
+    return Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "routing.yaml"
+
+
+def _available_file(td, lines):
+    p = Path(td) / "available.txt"
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return p
+
+
+def test_sync_unique_match_resolves_tiers():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        routing_path = _init_synced_project(runner, td)
+        available = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available)],
+        )
+        assert result.exit_code == 0, result.output
+        text = routing_path.read_text(encoding="utf-8")
+        assert "claude-opus-4-6" in text
+        assert "claude-sonnet-4-6" in text
+
+
+def test_sync_zero_matches_writes_full_inventory_no_prompt():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        routing_path = _init_synced_project(runner, td)
+        available = _available_file(td, ["totally-unrelated-model-a", "totally-unrelated-model-b"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available)],
+        )
+        assert result.exit_code == 0, result.output
+        data = yaml.safe_load(routing_path.read_text(encoding="utf-8"))
+        assert data["tiers"]["premium"] is None
+        assert data["tiers"]["standard"] is None
+        assert set(data["available"]) == {"totally-unrelated-model-a", "totally-unrelated-model-b"}
+
+
+def test_sync_ambiguous_alias_leaves_tier_null_with_unmatched_aliases():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        routing_path = _init_synced_project(runner, td)
+        # "glm latest" / "haiku" / "gpt-5-nano" all fail to match; two models
+        # both substring-match "claude opus" ambiguously for premium.
+        available = _available_file(td, ["claude-opus-a", "claude-opus-b", "claude-sonnet-4-6"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available)],
+        )
+        assert result.exit_code == 0, result.output
+        data = yaml.safe_load(routing_path.read_text(encoding="utf-8"))
+        assert data["tiers"]["premium"] is None
+        assert "premium" in data["unmatched_aliases"]
+
+
+def test_sync_dry_run_writes_nothing():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        routing_path = _init_synced_project(runner, td)
+        before = routing_path.read_bytes()
+        available = _available_file(td, ["claude-opus-4-6"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available), "--dry-run"],
+        )
+        assert result.exit_code == 0, result.output
+        assert routing_path.read_bytes() == before
+
+
+def test_sync_missing_catalog_errors_no_file_written():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--routing"])
+        routing_path = Path(td) / "docs" / "ai" / "QromaCore" / "Hamburg" / "Gallery Refactor" / "routing.yaml"
+        before = routing_path.read_bytes()
+        available = _available_file(td, ["claude-opus-4-6"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available)],
+        )
+        assert result.exit_code != 0
+        assert routing_path.read_bytes() == before
+
+
+def test_sync_not_opted_in_errors():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        runner.invoke(main, ["dev", "init", SAMPLE, "--no-routing"])
+        _write_models_yaml_v080(Path(td), CATALOG_YAML)
+        available = _available_file(td, ["claude-opus-4-6"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available)],
+        )
+        assert result.exit_code != 0
+
+
+def test_sync_preserves_pinned_tier():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        routing_path = _init_synced_project(runner, td)
+        available1 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6"])
+        runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available1)],
+        )
+        # Hand-edit premium.
+        text = routing_path.read_text(encoding="utf-8")
+        text = text.replace("claude-opus-4-6", "hand-picked-model", 1)
+        routing_path.write_text(text, encoding="utf-8")
+
+        available2 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6", "hand-picked-model"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available2)],
+        )
+        assert result.exit_code == 0, result.output
+        data = yaml.safe_load(routing_path.read_text(encoding="utf-8"))
+        assert data["tiers"]["premium"] == "hand-picked-model"
+        assert "premium" in data["pinned"]
+
+
+def test_sync_warns_when_pinned_slug_no_longer_available():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        routing_path = _init_synced_project(runner, td)
+        available1 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6"])
+        runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available1)],
+        )
+        text = routing_path.read_text(encoding="utf-8")
+        text = text.replace("claude-opus-4-6", "hand-picked-model", 1)
+        routing_path.write_text(text, encoding="utf-8")
+
+        # Second sync: hand-picked-model is gone from the available set.
+        available2 = _available_file(td, ["claude-sonnet-4-6"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available2)],
+        )
+        assert result.exit_code == 0, result.output
+        assert "premium" in result.output
+        assert "hand-picked-model" in result.output
+
+
+def test_sync_repin_clears_pin_and_states_discard():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        routing_path = _init_synced_project(runner, td)
+        available1 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6"])
+        runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available1)],
+        )
+        text = routing_path.read_text(encoding="utf-8")
+        text = text.replace("claude-opus-4-6", "hand-picked-model", 1)
+        routing_path.write_text(text, encoding="utf-8")
+
+        available2 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6", "hand-picked-model"])
+        # A normal sync first records the hand-edit as an actual pin.
+        runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available2)],
+        )
+        assert "premium" in yaml.safe_load(routing_path.read_text(encoding="utf-8"))["pinned"]
+
+        available3 = _available_file(td, ["claude-opus-4-6", "claude-sonnet-4-6"])
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(available3), "--repin"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "premium" in result.output
+        data = yaml.safe_load(routing_path.read_text(encoding="utf-8"))
+        assert data["tiers"]["premium"] == "claude-opus-4-6"
+        assert data["pinned"] == []
+
+
+def test_sync_missing_available_file_is_usage_error():
+    runner = _runner()
+    with runner.isolated_filesystem() as td:
+        _init_synced_project(runner, td)
+        result = runner.invoke(
+            main,
+            ["dev", "routing", "sync", SAMPLE, "--host", "claude", "--available", str(Path(td) / "nope.txt")],
+        )
+        assert result.exit_code != 0
